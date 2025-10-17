@@ -76,10 +76,10 @@ impl E {
 impl E {
     fn to_string(&self) -> String {
         match self {
-            E::Add(e, e1) => format!("({}+{})", e.to_string(), e1.to_string()),
-            E::Neg(e) => format!("(-{})", e.to_string()),
-            E::Mul(e, e1) => format!("({}*{})", e.to_string(), e1.to_string()),
-            E::Inv(e) => format!("(1/({}))", e.to_string()),
+            E::Add(e, e1) => format!("({} + {})", e.to_string(), e1.to_string()),
+            E::Neg(e) => format!("-({})", e.to_string()),
+            E::Mul(e, e1) => format!("({} * {})", e.to_string(), e1.to_string()),
+            E::Inv(e) => format!("1/({})", e.to_string()),
             E::Const(v) => v.to_string(),
             E::Func { name, arg } => format!("{}({})", name, arg.to_string()),
             E::Var(var) => var.to_string(),
@@ -102,11 +102,12 @@ impl E {
                 E::mul(e.clone().diff(by), e1.clone()),
                 E::mul(e, e1.diff(by)),
             ),
-            E::Inv(e) => E::neg(E::mul(E::inv(E::mul(e.clone(), e.clone())), e.diff(by))),
+            E::Inv(e) => E::mul(E::neg(E::inv(E::mul(e.clone(), e.clone()))), e.diff(by)),
             E::Const(_) => E::constant(Const::Numeric(0)),
-            E::Func { name, arg } => {
-                E::mul(E::func(format!("{}'", name), arg.clone()), arg.diff(by))
-            }
+            E::Func { name, arg } => E::mul(
+                E::func(format!("{}_{}", name, by.to_string()), arg.clone()),
+                arg.diff(by),
+            ),
             E::Var(var) => {
                 if var == by {
                     return E::constant(Const::Numeric(1));
@@ -114,6 +115,67 @@ impl E {
 
                 E::constant(Const::Numeric(0))
             }
+        }
+    }
+
+    fn unpack_inv_inv(self) -> Option<Box<Self>> {
+        let E::Inv(inner) = self else {
+            return None;
+        };
+
+        let E::Inv(inner2) = *inner else {
+            return None;
+        };
+
+        Some(inner2)
+    }
+
+    fn uninv(self: Box<Self>) -> Box<Self> {
+        let mut ret = self;
+
+        while let Some(a) = ret.clone().unpack_inv_inv() {
+            ret = a;
+        }
+
+        ret
+    }
+
+    fn unpack_neg_neg(self) -> Option<Box<Self>> {
+        if let E::Neg(outer) = self
+            && let E::Neg(inner) = *outer
+        {
+            return Some(inner);
+        }
+
+        None
+    }
+
+    fn unneg(self: Box<Self>) -> Box<Self> {
+        let mut ret = self;
+
+        while let Some(a) = ret.clone().unpack_neg_neg() {
+            ret = a;
+        }
+
+        ret
+    }
+
+    fn substitute(self, name: &str, value: Box<Self>) -> Box<Self> {
+        match self {
+            E::Add(e, e1) => E::add(
+                e.substitute(name, value.clone()),
+                e1.substitute(name, value),
+            ),
+            E::Neg(e) => E::neg(e.substitute(name, value)),
+            E::Mul(e, e1) => E::mul(
+                e.substitute(name, value.clone()),
+                e1.substitute(name, value),
+            ),
+            E::Inv(e) => E::inv(e.substitute(name, value)),
+            E::Const(Const::Named(n)) if n == name => value,
+            E::Const(_) => Box::new(self),
+            E::Func { name: n, arg: a } => E::func(n, a.substitute(name, value)),
+            E::Var(_) => Box::new(self),
         }
     }
 }
@@ -125,8 +187,49 @@ fn main() {
     };
     println!("{}", expr.to_string());
 
+    let expr2 = E::add(
+        E::var(Var::Y),
+        E::add(E::var(Var::Z), E::constant(Const::Named("LOL".into()))),
+    );
+    println!("{}", expr2.to_string());
+
     let expr = expr.diff(Var::X);
     println!("{}", expr.to_string());
+
+    let diff_arg_count = expr.arg_count();
+    println!("Diff Arg count: {}", diff_arg_count);
+
+    let substituted = expr2.substitute("LOL", E::func("y".into(), E::var(Var::X)));
+    println!("Substituted: {}", substituted.to_string());
+
+    let mut multiple_neg = E::var(Var::X);
+
+    for _ in 1..10 {
+        multiple_neg = E::neg(multiple_neg);
+    }
+    println!("Many negs: {}", multiple_neg.to_string());
+    println!(
+        "One neg removed: {}",
+        match multiple_neg.clone().unpack_neg_neg() {
+            Some(e) => e.to_string(),
+            None => "None found".into(),
+        }
+    );
+    println!("All negs removed: {}", multiple_neg.unneg().to_string());
+
+    let mut many_invs = E::var(Var::X);
+    for _ in 1..10 {
+        many_invs = E::inv(many_invs);
+    }
+    println!("Many invs: {}", many_invs.to_string());
+    println!(
+        "One inv removed: {}",
+        match many_invs.clone().unpack_inv_inv() {
+            Some(e) => e.to_string(),
+            None => "None found".into(),
+        }
+    );
+    println!("All negs removed: {}", many_invs.uninv().to_string());
 }
 #[cfg(test)]
 mod tests {
