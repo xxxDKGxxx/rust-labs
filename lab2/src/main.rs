@@ -157,7 +157,7 @@ fn main() {
     let string: String = String::from("Tekst1");
     let str_slice: &str = "Test";
 
-    // let db1 = DoubleString::from_strings(&string, str_slice);
+    // let db1 = DoubleString::from_strings(&string, &str_slice);
     let db1 = DoubleString::from_strings(&string, &string);
     let db2 = DoubleString::from_strs(&string, str_slice);
 
