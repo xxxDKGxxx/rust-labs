@@ -88,8 +88,8 @@ impl E {
 
     fn arg_count(&self) -> u32 {
         match self {
-            Self::Add(_, _) | Self::Mul(_, _) => 2,
-            Self::Neg(_) | Self::Inv(_) | Self::Func { name: _, arg: _ } => 1,
+            Self::Add(..) | Self::Mul(..) => 2,
+            Self::Neg(_) | Self::Inv(_) | Self::Func { .. } => 1,
             _ => 0,
         }
     }
@@ -229,7 +229,7 @@ fn main() {
             None => "None found".into(),
         }
     );
-    println!("All negs removed: {}", many_invs.uninv().to_string());
+    println!("All invs removed: {}", many_invs.uninv().to_string());
 }
 #[cfg(test)]
 mod tests {
