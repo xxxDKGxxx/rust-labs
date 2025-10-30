@@ -191,6 +191,7 @@ fn main() {
         E::var(Var::Y),
         E::add(E::var(Var::Z), E::constant(Const::Named("LOL".into()))),
     );
+
     println!("{}", expr2.to_string());
 
     let expr = expr.diff(Var::X);
