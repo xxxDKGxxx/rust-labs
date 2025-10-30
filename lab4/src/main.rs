@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::io::{Error, Read, Write};
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::num::NonZero;
 use std::os::unix::ffi::OsStrExt;
@@ -13,7 +13,7 @@ fn divisors(n: NonZero<u32>) -> BTreeSet<NonZero<u32>> {
     let value = n.get();
 
     for i in 2..n.get() {
-        if !(value % i == 0) {
+        if !value.is_multiple_of(i) {
             continue;
         }
 
@@ -55,8 +55,7 @@ fn divisors_benchmark(iter: u16) {
 }
 
 fn bulk_read(stream: &mut TcpStream, size: usize) -> io::Result<Vec<u8>> {
-    let mut result: Vec<u8> = Vec::new();
-    result.resize(size, 0);
+    let mut result: Vec<u8> = vec![0; size];
     let mut count = 0;
 
     loop {
@@ -77,7 +76,7 @@ fn bulk_read(stream: &mut TcpStream, size: usize) -> io::Result<Vec<u8>> {
         result.resize(count, 0);
     }
 
-    return Ok(result);
+    Ok(result)
 }
 
 fn bulk_write(stream: &mut TcpStream, buf: &[u8]) -> io::Result<()> {
@@ -121,16 +120,16 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
 
         let path_str = match String::from_utf8(path) {
             Err(_) => {
-                bulk_write(&mut stream, &"Conversion error\n".as_bytes())?;
+                bulk_write(&mut stream, "Conversion error\n".as_bytes())?;
                 return Ok(());
             }
             Ok(v) => v,
         };
 
-        let path_buf = match PathBuf::from_str(&path_str) {
+        let path_buf = match PathBuf::from_str(path_str.trim()) {
             Ok(path) => path,
             Err(_) => {
-                bulk_write(&mut stream, &"Bad path\n".as_bytes())?;
+                bulk_write(&mut stream, "Bad path\n".as_bytes())?;
                 return Ok(());
             }
         };
@@ -140,8 +139,8 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         let read_dir = match fs::read_dir(path_buf) {
             Ok(read_dir) => read_dir,
             Err(e) => {
-                bulk_write(&mut stream, &"Bad dir\n".as_bytes())?;
-                println!("Error occured while reading dir: {}\n", e.to_string());
+                bulk_write(&mut stream, "Bad dir\n".as_bytes())?;
+                println!("Error occured while reading dir: {}\n", e);
                 return Ok(());
             }
         };
@@ -149,8 +148,8 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         for direntry in read_dir {
             let direntry = match direntry {
                 Err(e) => {
-                    bulk_write(&mut stream, &"Bad dir\n".as_bytes())?;
-                    println!("Error occured while reading dir: {}\n", e.to_string());
+                    bulk_write(&mut stream, "Bad dir\n".as_bytes())?;
+                    println!("Error occured while reading direntry: {}\n", e);
                     return Ok(());
                 }
 
@@ -159,10 +158,23 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
             response.append(&mut Vec::<u8>::from(direntry.file_name().as_bytes()));
             response.append(&mut Vec::<u8>::from("\n".as_bytes()));
         }
+
+        bulk_write(&mut stream, &response)?;
+
+        println!("Response written successfully");
     }
 }
 
 fn main() {
+    divisors_benchmark(10);
+
+    let arr = [1, 2, 3, 4, 5];
+    assert_sorted(&arr);
+
+    let val = NonZero::new(12).unwrap();
+    let divs = divisors(val);
+    println!("Divisors of {}: {:?}", val, divs);
+
     let listener = TcpListener::bind("localhost:8080").unwrap();
 
     for stream in listener.incoming() {
@@ -170,9 +182,8 @@ fn main() {
 
         println!("New client");
 
-        match handle_client(stream) {
-            Err(e) => println!("Error occured in handle_client: {}", e.to_string()),
-            _ => (),
+        if let Err(e) = handle_client(stream) {
+            println!("Error occured in handle_client: {}", e)
         };
     }
 }
