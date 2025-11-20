@@ -1,0 +1,29 @@
+WHITESPACE = _{ " " | "\t" | "\n" }
+
+table_name = @{ ASCII_ALPHANUMERIC+ } // Użycie @{} aby mieć czysty string
+key_name   = @{ ASCII_ALPHANUMERIC+ }
+field_name = @{ ASCII_ALPHANUMERIC+ }
+type_name  = @{ ASCII_ALPHA+ }
+key_value  = @{ ASCII_ALPHANUMERIC+ } // Użycie @{} jest opcjonalne, ale pomaga
+column_name = @{ ASCII_ALPHANUMERIC+ }
+op = @{ "=" | "!=" | ">" | "<" | ">=" | "<=" }
+value = @{ ASCII_ALPHANUMERIC+ }
+
+command = _{ (create_command | delete_command | select_query) ~ EOI }
+
+create_command  = { "CREATE" ~ table_name ~ "KEY" ~ key_name ~ (fields)? }
+fields          = { "FIELDS" ~ (field_type_pair ~ ",")* ~ field_type_pair }
+field_type_pair = { field_name ~ ":" ~ type_name }
+
+// Ta reguła powinna działać bez zmian, jeśli Pest poprawnie ignoruje WHITESPACE
+delete_command = { "DELETE" ~ key_value ~ "FROM" ~ table_name }
+
+select_query = { "SELECT" ~ column_names ~ "FROM" ~ table_name ~ where_clause? }
+column_names = { (column_name ~ ",")* ~ column_name }
+where_clause = { "WHERE" ~ expr }
+expr = { or_expr }
+or_expr = { and_expr ~ ("OR" ~ and_expr)* }
+and_expr = { primary_expr ~ ("AND" ~ primary_expr)* }k
+primary_expr = { operator_expr | bracketed_expr }
+operator_expr = { column_name ~ op ~ value }
+bracketed_expr = { "(" ~ expr ~ ")" }
