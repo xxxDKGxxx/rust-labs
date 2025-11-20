@@ -1,5 +1,5 @@
-use itertools::{Iterate, Itertools};
-use std::collections::{BTreeSet, HashSet};
+use itertools::Itertools;
+use std::collections::HashSet;
 
 // Nie zmieniaj ciała tej funkcji — jedynie typy.
 pub fn wrap_call(f1: impl Fn(u32) -> u32, f2: impl FnOnce(u32, u32) -> u32) -> u32 {
@@ -91,29 +91,24 @@ pub fn cycles_2(edges: &[(u32, u32)]) -> Vec<u32> {
         .collect::<Vec<u32>>()
 }
 
-pub fn primes_loop(n: u32) -> Vec<u32> {
-    let mut sito = Vec::<u32>::with_capacity(n as usize);
-    let mut result = Vec::<u32>::new();
+fn is_prime(candidate: u32) -> bool {
+    let limit = (candidate as f64).sqrt() as u32;
 
-    for _ in 1..=n + 1 {
-        sito.push(0);
+    for divisor in 2..=limit {
+        if candidate.is_multiple_of(divisor) {
+            return false;
+        }
     }
 
-    for i in 2..n {
-        if sito[i as usize] == 0 {
-            result.push(i);
-        }
+    true
+}
 
-        let mut curr_num = i;
+pub fn primes_loop(n: u32) -> Vec<u32> {
+    let mut result = Vec::<u32>::new();
 
-        loop {
-            if curr_num > n {
-                break;
-            }
-
-            sito[curr_num as usize] = 1;
-
-            curr_num += curr_num
+    for candidate in 2..n {
+        if is_prime(candidate) {
+            result.push(candidate);
         }
     }
 
@@ -121,35 +116,64 @@ pub fn primes_loop(n: u32) -> Vec<u32> {
 }
 
 pub fn primes(n: u32) -> Vec<u32> {
-    let mut sito = (1..=n + 1).map(|x| 0).collect::<Vec<u32>>();
+    (2..n)
+        .filter(|&candidate| {
+            let limit = (candidate as f64).sqrt() as u32;
 
-    (2..n).fold(Vec::new(), |acc, el| {
-        if sito[el as usize] == 0 {
-            acc.push(el);
-            sito = sito.iter().enumerate().map(|el| {
-                if el.0 
-            })
-        }
-    })
+            (2..=limit).all(|divisor| candidate % divisor != 0)
+        })
+        .collect()
 }
 
 pub fn run_length_encode_loop(list: &[u32]) -> Vec<(u32, usize)> {
-    todo!()
+    let mut result = Vec::<(u32, usize)>::new();
+
+    if list.is_empty() {
+        return result;
+    }
+
+    let mut current_num = list[0];
+    let mut count = 1;
+
+    for el in list[1..].iter() {
+        if *el == current_num {
+            count += 1;
+            continue;
+        }
+
+        result.push((current_num, count));
+        current_num = *el;
+        count = 1;
+    }
+
+    result.push((current_num, count));
+
+    result
 }
 
 pub fn run_length_encode(list: &[u32]) -> Vec<(u32, usize)> {
-    todo!()
+    list.chunk_by(|a, b| a == b)
+        .map(|chunk| (chunk[0], chunk.len()))
+        .collect()
 }
 
 pub fn compose_all_loop(fns: &[fn(i32) -> i32]) -> impl Fn(i32) -> i32 {
-    |x| x
+    move |x| -> i32 {
+        let mut curr = x;
+
+        for fun in fns {
+            curr = fun(curr)
+        }
+
+        curr
+    }
 }
 
 pub fn compose_all(fns: &[fn(i32) -> i32]) -> impl Fn(i32) -> i32 {
-    |x| x
+    move |x| -> i32 { fns.iter().fold(x, |curr, f| f(curr)) }
 }
 
-fn make_counter(start: i64) -> impl FnMut() -> i64 {
+pub fn make_counter(start: i64) -> impl FnMut() -> i64 {
     let mut start = start - 1;
 
     move || -> i64 {

@@ -49,5 +49,5 @@ fn main() {
 }
 
 fn print_record_value_list(columns: Vec<String>, records: Box<Vec<Vec<record::Value>>>) {
-    todo!()
+    
 }
