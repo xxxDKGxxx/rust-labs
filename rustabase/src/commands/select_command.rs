@@ -1,5 +1,5 @@
 use crate::{
-    commands::command::{Command, CommandError},
+    commands::command::{Command, CommandError, CommandResult},
     database::{
         key::DatabaseKey,
         table::{
@@ -19,7 +19,7 @@ pub struct SelectCommand<'a, K: DatabaseKey, F: WhereFilter<K>> {
     table: &'a Table<K>,
     selected_columns: Vec<String>,
     where_filter: F,
-    select_result: Option<Vec<Vec<Value>>>,
+    select_result: Option<Box<Vec<Vec<Value>>>>,
 }
 
 impl<'a, K: DatabaseKey, F: WhereFilter<K>> Command<K> for SelectCommand<'a, K, F> {
@@ -55,9 +55,16 @@ impl<'a, K: DatabaseKey, F: WhereFilter<K>> Command<K> for SelectCommand<'a, K, 
 
         let successes = successes.into_iter().filter_map(Result::ok).collect();
 
-        self.select_result = Some(successes);
+        self.select_result = Some(Box::new(successes));
 
         Ok(())
+    }
+
+    fn get_result(&self) -> CommandResult {
+        match &self.select_result {
+            Some(res) => CommandResult::RecordValueList(self.selected_columns.clone(), res.clone()),
+            None => CommandResult::Void,
+        }
     }
 }
 

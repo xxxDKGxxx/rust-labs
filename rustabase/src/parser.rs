@@ -38,8 +38,10 @@ impl CommandParser {
         };
 
         for pair in pairs {
-            if pair.as_rule() == Rule::create_command {
-                return CommandParser::parse_create(pair, db);
+            match pair.as_rule() {
+                Rule::create_command => return CommandParser::parse_create(pair, db),
+                Rule::
+                _ => (),
             };
         }
 

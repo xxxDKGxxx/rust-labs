@@ -3,7 +3,10 @@ use thiserror::Error;
 use crate::database::{
     DatabaseError,
     key::DatabaseKey,
-    table::{TableError, record::RecordError},
+    table::{
+        TableError,
+        record::{RecordError, Value},
+    },
 };
 
 #[derive(Error, Debug, PartialEq)]
@@ -28,6 +31,15 @@ pub enum CommandError<K: DatabaseKey> {
     },
 }
 
+pub enum CommandResult {
+    Void,
+    RecordValueList(Vec<String>, Box<Vec<Vec<Value>>>),
+}
+
 pub trait Command<K: DatabaseKey> {
     fn execute(&mut self) -> Result<(), CommandError<K>>;
+
+    fn get_result(&self) -> CommandResult {
+        CommandResult::Void
+    }
 }
