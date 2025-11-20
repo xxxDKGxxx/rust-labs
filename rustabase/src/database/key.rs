@@ -1,3 +1,4 @@
+
 use crate::database::table::record::Value;
 
 pub trait DatabaseKey: Ord + Clone {

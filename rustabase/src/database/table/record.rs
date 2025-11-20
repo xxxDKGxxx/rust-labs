@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use thiserror::Error;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Value {
     BOOL(bool),
     STRING(String),
@@ -33,17 +33,17 @@ pub struct RecordBuilder {
 }
 
 impl Value {
-    fn is_the_same_type_as(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Value::BOOL(_), Value::BOOL(_)) => true,
-            (Value::STRING(_), Value::STRING(_)) => true,
-            (Value::INT(_), Value::INT(_)) => true,
-            (Value::FLOAT(_), Value::FLOAT(_)) => true,
-            _ => false,
-        }
+    pub fn is_the_same_type_as(&self, other: &Self) -> bool {
+        matches!(
+            (self, other),
+            (Value::BOOL(_), Value::BOOL(_))
+                | (Value::STRING(_), Value::STRING(_))
+                | (Value::INT(_), Value::INT(_))
+                | (Value::FLOAT(_), Value::FLOAT(_))
+        )
     }
 
-    fn type_name(&self) -> String {
+    pub fn type_name(&self) -> String {
         match self {
             Value::BOOL(_) => String::from("BOOL"),
             Value::STRING(_) => String::from("STRING"),
@@ -54,7 +54,7 @@ impl Value {
 }
 
 impl Record {
-    pub fn new() -> RecordBuilder {
+    pub fn new_builder() -> RecordBuilder {
         RecordBuilder {
             record: Record {
                 values_map: HashMap::new(),
@@ -97,16 +97,12 @@ impl Record {
             .map(|name| self.get_value(name))
             .collect();
 
-        let (successes, errors): (
-            Vec<Result<&Value, RecordError>>,
-            Vec<Result<&Value, RecordError>>,
-        ) = results.into_iter().partition(Result::is_ok);
+        let (successes, errors): (Vec<_>, Vec<_>) = results.into_iter().partition(Result::is_ok);
 
         let errors: Vec<RecordError> = errors.into_iter().filter_map(Result::err).collect();
 
-        match errors.into_iter().next() {
-            Some(err) => return Err(err),
-            _ => (),
+        if let Some(err) = errors.into_iter().next() {
+            return Err(err);
         }
 
         let successes: Vec<Value> = successes
@@ -167,9 +163,8 @@ impl RecordBuilder {
     }
 
     pub fn build(self) -> Result<Record, RecordError> {
-        match self.errors.into_iter().next() {
-            Some(err) => return Err(err),
-            _ => (),
+        if let Some(err) = self.errors.into_iter().next() {
+            return Err(err);
         };
 
         Ok(self.record)
@@ -242,7 +237,7 @@ mod tests {
 
     #[test]
     fn record_building_test() {
-        let record = Record::new()
+        let record = Record::new_builder()
             .with_column("Name", Value::STRING(String::from("John")))
             .with_column("Age", Value::INT(24))
             .with_column("Married", Value::BOOL(false))
@@ -267,7 +262,7 @@ mod tests {
 
     #[test]
     fn record_building_failure_test() {
-        let record = Record::new()
+        let record = Record::new_builder()
             .with_column("Name", Value::STRING(String::from("John")))
             .with_column("Name", Value::INT(24))
             .with_column("Married", Value::BOOL(false))
@@ -290,7 +285,7 @@ mod tests {
 
     #[test]
     fn record_get_value_success_test() {
-        let record = Record::new()
+        let record = Record::new_builder()
             .with_column("A", Value::INT(10))
             .with_column("B", Value::STRING("Hello".to_string()))
             .build()
@@ -305,7 +300,7 @@ mod tests {
 
     #[test]
     fn record_get_value_failure_test() {
-        let record = Record::new().build().unwrap();
+        let record = Record::new_builder().build().unwrap();
 
         assert_eq!(
             record.get_value("Missing").unwrap_err(),
@@ -315,7 +310,7 @@ mod tests {
 
     #[test]
     fn record_get_values_success_test() {
-        let record = Record::new()
+        let record = Record::new_builder()
             .with_column("ID", Value::INT(1))
             .with_column("Status", Value::STRING("Active".to_string()))
             .with_column("Price", Value::FLOAT(99.99f64))
@@ -333,7 +328,7 @@ mod tests {
 
     #[test]
     fn record_get_values_failure_test() {
-        let record = Record::new()
+        let record = Record::new_builder()
             .with_column("ID", Value::INT(1))
             .with_column("Status", Value::STRING("Active".to_string()))
             .build()

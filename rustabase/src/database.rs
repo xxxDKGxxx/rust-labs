@@ -9,7 +9,7 @@ pub mod key;
 pub mod table;
 
 #[derive(Error, Debug, PartialEq)]
-enum DatabaseError<K: DatabaseKey> {
+pub enum DatabaseError<K: DatabaseKey> {
     #[error("Table named: {0} already exists")]
     TableAlreadyExistsError(String),
 
@@ -20,16 +20,22 @@ enum DatabaseError<K: DatabaseKey> {
     TableNotFoundError(String),
 }
 
-struct Database<K: DatabaseKey> {
+pub struct Database<K: DatabaseKey> {
     tables: Vec<Table<K>>,
 }
 
+impl<K: DatabaseKey> Default for Database<K> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K: DatabaseKey> Database<K> {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self { tables: Vec::new() }
     }
 
-    fn create_table(
+    pub fn create_table(
         &mut self,
         table_name: String,
         key_name: String,
@@ -46,7 +52,7 @@ impl<K: DatabaseKey> Database<K> {
             return Err(DatabaseError::TableAlreadyExistsError(table_name));
         }
 
-        let mut new_table = Table::<K>::new(table_name, key_name);
+        let mut new_table = Table::<K>::new_builder(table_name, key_name);
 
         for (field, t) in fields.into_iter().zip(types.into_iter()) {
             new_table = new_table.with_column(field, t);
@@ -58,7 +64,7 @@ impl<K: DatabaseKey> Database<K> {
         Ok(())
     }
 
-    fn get_table(&mut self, table_name: String) -> Result<&mut Table<K>, DatabaseError<K>> {
+    pub fn get_table(&mut self, table_name: String) -> Result<&mut Table<K>, DatabaseError<K>> {
         match self
             .tables
             .iter_mut()
@@ -67,6 +73,10 @@ impl<K: DatabaseKey> Database<K> {
             Some(tab) => Ok(tab),
             None => Err(DatabaseError::TableNotFoundError(table_name)),
         }
+    }
+
+    pub fn get_table_names(&self) -> Vec<&str> {
+        self.tables.iter().map(|t| t.get_name()).collect()
     }
 }
 

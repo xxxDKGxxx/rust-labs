@@ -1,0 +1,40 @@
+WHITESPACE = _{ " " | "\t" | "\n" }
+
+table_name  = @{ ASCII_ALPHANUMERIC+ }
+key_name    = @{ ASCII_ALPHANUMERIC+ }
+field_name  = @{ ASCII_ALPHANUMERIC+ }
+key_value   = @{ ASCII_ALPHANUMERIC+ }
+column_name = @{ ASCII_ALPHANUMERIC+ }
+bool        = @{ "BOOL" }
+string      = @{ "STRING" }
+int         = @{ "INT" }
+float       = @{ "FLOAT" }
+op          = @{ "=" | "!=" | ">" | "<" | ">=" | "<=" }
+file_name   = @{ ASCII_ALPHANUMERIC+ }
+
+type = { bool | string | int | float }
+
+command = _{ (create_command | delete_command | select_query | save_as_command | read_from_command) ~ EOI }
+
+save_as_command   =  { "SAVE_AS" ~ file_name }
+read_from_command =  { "READ_FROM" ~ file_name }
+create_command    =  { "CREATE" ~ table_name ~ "KEY" ~ key_name ~ (fields)? }
+fields            = _{ "FIELDS" ~ (field_type_pair ~ ",")* ~ field_type_pair }
+field_type_pair   =  { field_name ~ ":" ~ type }
+
+delete_command = { "DELETE" ~ key_value ~ "FROM" ~ table_name }
+
+select_query   =  { "SELECT" ~ column_names ~ "FROM" ~ table_name ~ where_clause? }
+column_names   =  { (column_name ~ ",")* ~ column_name }
+where_clause   =  { "WHERE" ~ expr }
+expr           = _{ or_expr }
+or_expr        =  { and_expr ~ ("OR" ~ and_expr)* }
+and_expr       =  { primary_expr ~ ("AND" ~ primary_expr)* }
+primary_expr   = _{ operator_expr | bracketed_expr }
+operator_expr  =  { column_name ~ op ~ value }
+value          = _{ bool_value | float_value | int_value | string_value | column_name }
+bool_value     =  { "true" | "false" }
+int_value      =  { "-"? ~ ASCII_DIGIT+ }
+float_value    =  { "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+string_value   =  { "\"" ~ ASCII_ALPHANUMERIC* ~ "\"" }
+bracketed_expr = _{ "(" ~ expr ~ ")" }

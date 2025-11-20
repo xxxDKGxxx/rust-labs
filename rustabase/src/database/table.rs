@@ -63,17 +63,17 @@ pub struct TableBuilder<K: DatabaseKey> {
 }
 
 impl ColumnType {
-    fn is_type_of(&self, other: &Value) -> bool {
-        match (self, other) {
-            (ColumnType::BOOL, Value::BOOL(_)) => true,
-            (ColumnType::STRING, Value::STRING(_)) => true,
-            (ColumnType::INT, Value::INT(_)) => true,
-            (ColumnType::FLOAT, Value::FLOAT(_)) => true,
-            _ => false,
-        }
+    pub fn is_type_of(&self, other: &Value) -> bool {
+        matches!(
+            (self, other),
+            (ColumnType::BOOL, Value::BOOL(_))
+                | (ColumnType::STRING, Value::STRING(_))
+                | (ColumnType::INT, Value::INT(_))
+                | (ColumnType::FLOAT, Value::FLOAT(_))
+        )
     }
 
-    fn from_value(value: &Value) -> Self {
+    pub fn from_value(value: &Value) -> Self {
         match value {
             Value::BOOL(_) => ColumnType::BOOL,
             Value::STRING(_) => ColumnType::STRING,
@@ -92,7 +92,11 @@ impl<K: DatabaseKey> Table<K> {
         &self.columns
     }
 
-    pub fn new(name: String, key_name: String) -> TableBuilder<K> {
+    pub fn get_key_name(&self) -> &str {
+        &self.key_name
+    }
+
+    pub fn new_builder(name: String, key_name: String) -> TableBuilder<K> {
         TableBuilder {
             table: Self {
                 name,
@@ -105,7 +109,7 @@ impl<K: DatabaseKey> Table<K> {
         }
     }
 
-    fn insert(
+    pub fn insert(
         &mut self,
         column_names: Vec<String>,
         column_values: Vec<Value>,
@@ -113,15 +117,15 @@ impl<K: DatabaseKey> Table<K> {
         let missing_columns: Vec<String> = self
             .columns
             .keys()
+            .filter(|&column| !column_names.contains(column))
             .cloned()
-            .filter(|column| !column_names.contains(column))
             .collect();
 
-        if missing_columns.len() > 0 {
+        if !missing_columns.is_empty() {
             return Err(TableError::InsertMissingColumnsError(missing_columns));
         }
 
-        let mut new_record = Record::new();
+        let mut new_record = Record::new_builder();
 
         for (name, value) in column_names.into_iter().zip(column_values.into_iter()) {
             let t = match self.columns.get(&name) {
@@ -159,7 +163,7 @@ impl<K: DatabaseKey> Table<K> {
         Ok(())
     }
 
-    fn delete(&mut self, key: K) -> Result<(), TableError<K>> {
+    pub fn delete(&mut self, key: K) -> Result<(), TableError<K>> {
         match self.records.remove(&key) {
             Some(_) => Ok(()),
             None => Err(TableError::KeyNotFoundError(key)),
@@ -169,7 +173,7 @@ impl<K: DatabaseKey> Table<K> {
     pub fn filter(&self, filter: impl Fn(&Record) -> bool) -> Vec<&Record> {
         self.records
             .values()
-            .filter(|record| filter(*record))
+            .filter(|record| filter(record))
             .collect()
     }
 }
@@ -191,9 +195,8 @@ impl<K: DatabaseKey> TableBuilder<K> {
     }
 
     pub fn build(self) -> Result<Table<K>, TableError<K>> {
-        match self.errors.into_iter().next() {
-            Some(err) => return Err(err),
-            _ => (),
+        if let Some(err) = self.errors.into_iter().next() {
+            return Err(err);
         };
 
         Ok(self.table)
@@ -205,7 +208,7 @@ mod tests {
     use super::*;
 
     fn prepare_test_table() -> Table<i64> {
-        let table: Table<i64> = Table::new("Orders".to_string(), "OrderId".to_string())
+        let table: Table<i64> = Table::new_builder("Orders".to_string(), "OrderId".to_string())
             .with_column("ClientName".to_string(), ColumnType::STRING)
             .with_column("Capacity".to_string(), ColumnType::INT)
             .build()
@@ -235,7 +238,7 @@ mod tests {
 
     #[test]
     fn table_creation_fail_test() {
-        let table = Table::<i64>::new("Orders".to_string(), "OrderId".to_string())
+        let table = Table::<i64>::new_builder("Orders".to_string(), "OrderId".to_string())
             .with_column("ClientName".to_string(), ColumnType::STRING)
             .with_column("ClientName".to_string(), ColumnType::FLOAT)
             .build();
