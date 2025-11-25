@@ -125,7 +125,7 @@ mod tests {
         };
 
         let result = command.execute();
-
+        print!("{:?}", result);
         assert!(result.is_err());
 
         assert_eq!(

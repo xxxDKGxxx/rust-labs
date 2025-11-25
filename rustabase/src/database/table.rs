@@ -125,7 +125,7 @@ impl<K: DatabaseKey> Table<K> {
         let missing_columns: Vec<String> = self
             .columns
             .keys()
-            .filter(|&column| !column_names.contains(column) && *column == self.key_name)
+            .filter(|&column| !column_names.contains(column) && *column != self.key_name)
             .cloned()
             .collect();
 

@@ -506,53 +506,382 @@ impl CommandParser {
 
 #[cfg(test)]
 mod tests {
-    use crate::commands::command::{Command, CommandError, CommandResult};
+    use crate::commands::command::{AnyCommand, Command};
+    use crate::database::table::ColumnType;
 
     use super::*;
 
-    // fn input_statement<K: DatabaseKey>(
-    //     stmt: &str,
-    //     db: &mut Database<K>,
-    // ) -> Result<CommandResult, CommandError> {
-    //     let command = CommandParser::parse_command(db, stmt).unwrap();
+    fn prepare_parser() -> CommandParser {
+        CommandParser::new()
+    }
 
-    //     command.execute()
-    // }
+    fn prepare_db() -> Database<i64> {
+        Database::<i64>::new()
+    }
 
-    // #[test]
-    // fn create_command_parsing_test() {
-    //     let statement = "CREATE Users KEY UserId FIELDS Name: STRING, Age: INT";
+    #[test]
+    fn parse_create_command_basic() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
 
-    //     let mut db = Database::<i64>::new();
+        let command_str = "CREATE Users KEY UserId FIELDS Name: STRING, Age: INT";
 
-    //     let command = CommandParser::parse_command(&mut db, statement).unwrap();
+        let result = parser.parse_command(&mut db, command_str);
 
-    //     let _ = command.execute().unwrap();
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::CreateCommand(create_cmd) => {
+                assert_eq!(create_cmd.table_name, "Users");
+                assert_eq!(create_cmd.key_name, "UserId");
+                assert_eq!(create_cmd.fields, vec!["Name", "Age"]);
+                assert_eq!(create_cmd.types, vec![ColumnType::STRING, ColumnType::INT]);
+            }
+            _ => panic!("Expected CreateCommand"),
+        }
+    }
 
-    //     assert!(db.get_table("Users").is_ok());
-    // }
-    // #[test]
-    // fn select_where_test() {
-    //     let mut db = Database::<i64>::new();
+    #[test]
+    fn parse_create_command_without_fields() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
 
-    //     let create_stmt = "CREATE Users KEY UserId";
+        let command_str = "CREATE Users KEY UserId";
 
-    //     let insert_1 = "INSERT UserId=1 INTO Users";
-    //     let insert_2 = "INSERT UserId=2 INTO Users";
-    //     let insert_3 = "INSERT UserId=3 INTO Users";
-    //     let insert_4 = "INSERT UserId=4 INTO Users";
+        let result = parser.parse_command(&mut db, command_str);
 
-    //     input_statement(create_stmt, &mut db).unwrap();
-    //     input_statement(insert_1, &mut db).unwrap();
-    //     input_statement(insert_2, &mut db).unwrap();
-    //     input_statement(insert_3, &mut db).unwrap();
-    //     input_statement(insert_4, &mut db).unwrap();
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::CreateCommand(create_cmd) => {
+                assert_eq!(create_cmd.table_name, "Users");
+                assert_eq!(create_cmd.key_name, "UserId");
+                assert!(create_cmd.fields.is_empty());
+                assert!(create_cmd.types.is_empty());
+            }
+            _ => panic!("Expected CreateCommand"),
+        }
+    }
 
-    //     let select = "SELECT UserId FROM Users WHERE (UserId = 3 OR UserId = 4) AND UserId < 4";
+    #[test]
+    fn parse_insert_command_basic() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
 
-    //     let command = CommandParser::parse_command(&mut db, select).unwrap();
-    //     let AnyCommand::SelectCommand(_) = command else {
-    //         panic!("Expected select");
-    //     };
-    // }
+        let create_str = "CREATE Users KEY UserId FIELDS Name: STRING, Age: INT";
+        parser
+            .parse_command(&mut db, create_str)
+            .unwrap()
+            .execute()
+            .unwrap();
+
+        let command_str = "INSERT Name=\"John\", Age=25 INTO Users";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::InsertCommand(insert_cmd) => {
+                assert_eq!(insert_cmd.fields, vec!["Name", "Age"]);
+                assert_eq!(
+                    insert_cmd.values,
+                    vec![Value::STRING("John".into()), Value::INT(25)]
+                );
+            }
+            _ => panic!("Expected InsertCommand"),
+        }
+    }
+
+    #[test]
+    fn parse_select_command_basic() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
+
+        let create_str = "CREATE Users KEY UserId FIELDS Name: STRING";
+        parser
+            .parse_command(&mut db, create_str)
+            .unwrap()
+            .execute()
+            .unwrap();
+
+        let command_str = "SELECT Name FROM Users";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::SelectCommand(select_cmd) => {
+                assert_eq!(select_cmd.selected_columns, vec!["Name"]);
+                assert_eq!(select_cmd.table.get_name(), "Users");
+            }
+            _ => panic!("Expected SelectCommand"),
+        }
+    }
+
+    #[test]
+    fn parse_select_command_with_where() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
+
+        // Najpierw stworzyć tabelę
+        let create_str = "CREATE Users KEY UserId FIELDS Age: INT";
+        parser
+            .parse_command(&mut db, create_str)
+            .unwrap()
+            .execute()
+            .unwrap();
+
+        let command_str = "SELECT Age FROM Users WHERE Age > 18";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::SelectCommand(_) => {}
+            _ => panic!("Expected SelectCommand"),
+        }
+    }
+
+    #[test]
+    fn parse_select_command_with_where_and() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
+
+        // Najpierw stworzyć tabelę
+        let create_str = "CREATE Users KEY UserId FIELDS Age: INT, Name: STRING";
+        parser
+            .parse_command(&mut db, create_str)
+            .unwrap()
+            .execute()
+            .unwrap();
+
+        let command_str = "SELECT Name FROM Users WHERE Age > 18 AND Name = \"John\"";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::SelectCommand(_) => {}
+            _ => panic!("Expected SelectCommand"),
+        }
+    }
+
+    #[test]
+    fn parse_select_command_with_where_or() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
+
+        // Najpierw stworzyć tabelę
+        let create_str = "CREATE Users KEY UserId FIELDS Age: INT, Status: STRING";
+        parser
+            .parse_command(&mut db, create_str)
+            .unwrap()
+            .execute()
+            .unwrap();
+
+        let command_str = "SELECT Age FROM Users WHERE Age < 30 OR Status = \"VIP\"";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::SelectCommand(_) => {}
+            _ => panic!("Expected SelectCommand"),
+        }
+    }
+
+    #[test]
+    fn parse_select_command_with_where_parentheses() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
+
+        // Najpierw stworzyć tabelę
+        let create_str = "CREATE Users KEY UserId FIELDS Age: INT, Status: STRING";
+        parser
+            .parse_command(&mut db, create_str)
+            .unwrap()
+            .execute()
+            .unwrap();
+
+        let command_str = "SELECT Age FROM Users WHERE (Age > 18 AND Age < 65) OR Status = \"VIP\"";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::SelectCommand(_) => {}
+            _ => panic!("Expected SelectCommand"),
+        }
+    }
+
+    #[test]
+    fn parse_select_command_with_where_operators() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
+
+        // Najpierw stworzyć tabelę
+        let create_str = "CREATE Users KEY UserId FIELDS Age: INT, Score: FLOAT, Active: BOOL";
+        parser
+            .parse_command(&mut db, create_str)
+            .unwrap()
+            .execute()
+            .unwrap();
+
+        let command_str =
+            "SELECT Age FROM Users WHERE Age >= 21 AND Score <= 100.5 AND Active = true";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::SelectCommand(_) => {}
+            _ => panic!("Expected SelectCommand"),
+        }
+    }
+
+    #[test]
+    fn parse_select_command_with_where_column_comparison() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
+
+        // Najpierw stworzyć tabelę
+        let create_str = "CREATE Users KEY UserId FIELDS Age: INT, MinAge: INT";
+        parser
+            .parse_command(&mut db, create_str)
+            .unwrap()
+            .execute()
+            .unwrap();
+
+        let command_str = "SELECT Age FROM Users WHERE Age > MinAge";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::SelectCommand(_) => {}
+            _ => panic!("Expected SelectCommand"),
+        }
+    }
+
+    #[test]
+    fn parse_select_command_with_where_not_equal() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
+
+        // Najpierw stworzyć tabelę
+        let create_str = "CREATE Users KEY UserId FIELDS Status: STRING";
+        parser
+            .parse_command(&mut db, create_str)
+            .unwrap()
+            .execute()
+            .unwrap();
+
+        let command_str = "SELECT Status FROM Users WHERE Status != \"Inactive\"";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::SelectCommand(_) => {}
+            _ => panic!("Expected SelectCommand"),
+        }
+    }
+
+    #[test]
+    fn parse_delete_command_basic() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
+
+        let create_str = "CREATE Users KEY UserId";
+        parser
+            .parse_command(&mut db, create_str)
+            .unwrap()
+            .execute()
+            .unwrap();
+
+        let command_str = "DELETE 1 FROM Users";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::DeleteCommand(delete_cmd) => {
+                assert_eq!(delete_cmd.key, 1i64);
+                assert_eq!(delete_cmd.table.get_name(), "Users");
+            }
+            _ => panic!("Expected DeleteCommand"),
+        }
+    }
+
+    #[test]
+    fn parse_save_as_command() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
+
+        let command_str = "SAVE_AS commands.txt";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::SaveAsCommand(save_cmd) => {
+                assert_eq!(save_cmd.file_name, "commands.txt");
+            }
+            _ => panic!("Expected SaveAsCommand"),
+        }
+    }
+
+    #[test]
+    fn parse_read_from_command() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
+
+        let command_str = "READ_FROM commands.txt";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_ok());
+        let command = result.unwrap();
+        match command {
+            AnyCommand::ReadFromCommand(read_cmd) => {
+                assert_eq!(read_cmd.file_name, "commands.txt");
+            }
+            _ => panic!("Expected ReadFromCommand"),
+        }
+    }
+
+    #[test]
+    fn parse_unknown_command_error() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
+
+        let command_str = "UNKNOWN COMMAND";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_invalid_syntax_error() {
+        let mut parser = prepare_parser();
+        let mut db = prepare_db();
+
+        let command_str = "CREATE INVALID SYNTAX";
+
+        let result = parser.parse_command(&mut db, command_str);
+
+        assert!(result.is_err());
+    }
 }
