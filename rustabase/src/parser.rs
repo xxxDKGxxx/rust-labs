@@ -42,6 +42,11 @@ pub enum ParserError {
 #[grammar = "./grammar.pest"]
 struct PestParser {}
 
+enum OperatorValue<'a> {
+    Value(Value),
+    Column(&'a str),
+}
+
 pub struct CommandParser {
     commands_parsed: Vec<String>,
 }
@@ -82,50 +87,70 @@ impl CommandParser {
         Err(ParserError::Error("Unknown command".into()))
     }
 
+    fn extract_table_name(pair: &Pair<'_, Rule>) -> Result<String, ParserError> {
+        for inner_pair in pair.clone().into_inner() {
+            if inner_pair.as_rule() == Rule::table_name {
+                return Ok(inner_pair.as_str().to_string());
+            }
+        }
+        Err(ParserError::MissingTokenError("table_name".into()))
+    }
+
+    fn extract_file_name(pair: &Pair<'_, Rule>) -> Result<String, ParserError> {
+        for inner_pair in pair.clone().into_inner() {
+            if inner_pair.as_rule() == Rule::file_name {
+                return Ok(inner_pair.as_str().to_string());
+            }
+        }
+        Err(ParserError::MissingTokenError("file_name".into()))
+    }
+
+    fn extract_key_name(pair: &Pair<'_, Rule>) -> Result<String, ParserError> {
+        for inner_pair in pair.clone().into_inner() {
+            if inner_pair.as_rule() == Rule::key_name {
+                return Ok(inner_pair.as_str().to_string());
+            }
+        }
+        Err(ParserError::MissingTokenError("key_name".into()))
+    }
+
     fn parse_create<'a, K: DatabaseKey>(
         &mut self,
         pair: Pair<'_, Rule>,
         db: &'a mut Database<K>,
     ) -> Result<AnyCommand<'a, K>, ParserError> {
-        let mut table_name = None;
-        let mut key_name = None;
-        let mut fields = Vec::<String>::new();
-        let mut types = Vec::<ColumnType>::new();
+        let table_name = Self::extract_table_name(&pair)?;
+        let key_name = Self::extract_key_name(&pair)?;
+        let (fields, types) = Self::parse_field_type_pairs(&pair)?;
 
         let command_str = pair.as_str().to_string();
 
-        for create_pair in pair.into_inner() {
-            match create_pair.as_rule() {
-                Rule::table_name => table_name = create_pair.as_str().into(),
-                Rule::key_name => key_name = create_pair.as_str().into(),
-                Rule::field_type_pair => {
-                    CommandParser::parse_field_type(&mut fields, &mut types, create_pair)?;
-                }
-                _ => {
-                    return Err(ParserError::UnknownRuleError(create_pair.to_string()));
-                }
-            }
-        }
-
-        let Some(table_name) = table_name else {
-            return Err(ParserError::MissingTokenError("table_name".into()));
-        };
-
-        let Some(key_name) = key_name else {
-            return Err(ParserError::MissingTokenError("key_name".into()));
-        };
-
         let res = CreateCommand {
             database: db,
-            table_name: table_name.into(),
-            key_name: key_name.into(),
+            table_name,
+            key_name,
             fields,
             types,
         };
 
         self.commands_parsed.push(command_str);
 
-        return Ok(res.into());
+        Ok(res.into())
+    }
+
+    fn parse_field_type_pairs(
+        pair: &Pair<'_, Rule>,
+    ) -> Result<(Vec<String>, Vec<ColumnType>), ParserError> {
+        let mut fields = Vec::<String>::new();
+        let mut types = Vec::<ColumnType>::new();
+
+        for create_pair in pair.clone().into_inner() {
+            if create_pair.as_rule() == Rule::field_type_pair {
+                Self::parse_field_type(&mut fields, &mut types, create_pair)?;
+            }
+        }
+
+        Ok((fields, types))
     }
 
     fn parse_field_type(
@@ -159,26 +184,12 @@ impl CommandParser {
         pair: Pair<'_, Rule>,
         db: &'a mut Database<K>,
     ) -> Result<AnyCommand<'a, K>, ParserError> {
-        let mut fields = Vec::<String>::new();
-        let mut values = Vec::<Value>::new();
-        let mut table_name = None;
+        let table_name = Self::extract_table_name(&pair)?;
+        let (fields, values) = Self::parse_field_value_pairs(&pair)?;
+
+        let table = db.get_table(&table_name)?;
 
         let command_str = pair.as_str().to_string();
-
-        for token in pair.into_inner() {
-            match token.as_rule() {
-                Rule::field_value_pair => {
-                    CommandParser::parse_field_value_pair(&mut fields, &mut values, token)?;
-                }
-                Rule::table_name => table_name = Some(token.as_str()),
-                _ => return Err(ParserError::UnknownRuleError(token.as_str().into())),
-            }
-        }
-        let Some(table_name) = table_name else {
-            return Err(ParserError::MissingTokenError("table_name".into()));
-        };
-
-        let table = db.get_table(table_name)?;
 
         let res = InsertCommand {
             table,
@@ -189,6 +200,21 @@ impl CommandParser {
         self.commands_parsed.push(command_str);
 
         Ok(res.into())
+    }
+
+    fn parse_field_value_pairs(
+        pair: &Pair<'_, Rule>,
+    ) -> Result<(Vec<String>, Vec<Value>), ParserError> {
+        let mut fields = Vec::<String>::new();
+        let mut values = Vec::<Value>::new();
+
+        for token in pair.clone().into_inner() {
+            if token.as_rule() == Rule::field_value_pair {
+                Self::parse_field_value_pair(&mut fields, &mut values, token)?;
+            }
+        }
+
+        Ok((fields, values))
     }
 
     fn parse_value(token: &Pair<'_, Rule>) -> Result<Option<Value>, ParserError> {
@@ -248,33 +274,13 @@ impl CommandParser {
         pair: Pair<'_, Rule>,
         db: &'a mut Database<K>,
     ) -> Result<AnyCommand<'a, K>, ParserError> {
-        let mut selected_columns = Vec::<String>::new();
-        let mut table_name = None;
-        let mut where_filter = NoOpWhereFilter {}.to_enum();
+        let table_name = Self::extract_table_name(&pair)?;
+        let selected_columns = Self::parse_column_names_from_pair(&pair)?;
+        let where_filter = Self::parse_where_clause(&pair)?;
+
+        let table = db.get_table(&table_name)?;
 
         let command_str = pair.as_str().to_string();
-
-        for token in pair.into_inner() {
-            match token.as_rule() {
-                Rule::column_names => {
-                    CommandParser::parse_column_names(&mut selected_columns, token)?;
-                }
-                Rule::table_name => table_name = Some(token.as_str()),
-                Rule::where_clause => {
-                    if let Some(where_token) = token.into_inner().next() {
-                        where_filter = CommandParser::construct_where_filter(where_token)?;
-                    } else {
-                        return Err(ParserError::MissingTokenError("or_expr".into()));
-                    }
-                }
-                _ => return Err(ParserError::UnknownRuleError(token.as_str().into())),
-            }
-        }
-
-        let Some(table_name) = table_name else {
-            return Err(ParserError::MissingTokenError("table_name".into()));
-        };
-        let table = db.get_table(table_name)?;
 
         let command = SelectCommand {
             table,
@@ -284,7 +290,33 @@ impl CommandParser {
 
         self.commands_parsed.push(command_str);
 
-        return Ok(command.into());
+        Ok(command.into())
+    }
+
+    fn parse_column_names_from_pair(pair: &Pair<'_, Rule>) -> Result<Vec<String>, ParserError> {
+        let mut selected_columns = Vec::<String>::new();
+
+        for token in pair.clone().into_inner() {
+            if token.as_rule() == Rule::column_names {
+                Self::parse_column_names(&mut selected_columns, token)?;
+            }
+        }
+
+        Ok(selected_columns)
+    }
+
+    fn parse_where_clause(pair: &Pair<'_, Rule>) -> Result<AnyWhereFilter, ParserError> {
+        for token in pair.clone().into_inner() {
+            if token.as_rule() == Rule::where_clause {
+                if let Some(where_token) = token.into_inner().next() {
+                    return Self::construct_where_filter(where_token);
+                } else {
+                    return Err(ParserError::MissingTokenError("or_expr".into()));
+                }
+            }
+        }
+
+        Ok(NoOpWhereFilter {}.to_enum())
     }
 
     fn parse_column_names(
@@ -320,34 +352,49 @@ impl CommandParser {
     }
 
     fn construct_operator_filter(token: Pair<'_, Rule>) -> Result<AnyWhereFilter, ParserError> {
+        let (column_name, op, value_or_column) = Self::parse_operator_components(token)?;
+
+        match value_or_column {
+            OperatorValue::Value(val) => {
+                let result = ValueOperatorFilter {
+                    column_name: column_name.into(),
+                    op: op.into(),
+                    value: val,
+                };
+                Ok(result.to_enum())
+            }
+            OperatorValue::Column(col2) => {
+                let result = ColumnOperatorFilter {
+                    column_name1: column_name.into(),
+                    op: op.into(),
+                    column_name2: col2.into(),
+                };
+                Ok(result.to_enum())
+            }
+        }
+    }
+
+    fn parse_operator_components<'a>(
+        token: Pair<'a, Rule>,
+    ) -> Result<(&'a str, &'a str, OperatorValue<'a>), ParserError> {
         let mut column_name: Option<&str> = None;
         let mut op: Option<&str> = None;
-        let mut value = None;
+        let mut value: Option<Value> = None;
+        let mut second_column: Option<&str> = None;
 
         for operator_token in token.into_inner() {
-            if let Some(val) = CommandParser::parse_value(&operator_token)? {
+            if let Some(val) = Self::parse_value(&operator_token)? {
                 value = Some(val);
             } else {
                 match operator_token.as_rule() {
-                    Rule::column_name => match column_name {
-                        Some(name) => {
-                            let Some(op) = op else {
-                                return Err(ParserError::MissingTokenError("op".into()));
-                            };
-
-                            let result = ColumnOperatorFilter {
-                                column_name1: name.into(),
-                                op: op.into(),
-                                column_name2: operator_token.as_str().into(),
-                            };
-
-                            return Ok(result.to_enum());
+                    Rule::column_name => {
+                        if column_name.is_none() {
+                            column_name = Some(operator_token.as_str());
+                        } else {
+                            second_column = Some(operator_token.as_str());
                         }
-                        None => column_name = Some(operator_token.as_str()),
-                    },
-                    Rule::op => {
-                        op = Some(operator_token.as_str());
                     }
+                    Rule::op => op = Some(operator_token.as_str()),
                     _ => {
                         return Err(ParserError::UnknownRuleError(
                             operator_token.as_str().into(),
@@ -357,28 +404,21 @@ impl CommandParser {
             }
         }
 
-        if let Some(column_name) = column_name
-            && let Some(op) = op
-            && let Some(value) = value
-        {
-            let result = ValueOperatorFilter {
-                column_name: column_name.into(),
-                op: op.into(),
-                value,
-            };
+        let column_name =
+            column_name.ok_or_else(|| ParserError::MissingTokenError("column_name".into()))?;
+        let op = op.ok_or_else(|| ParserError::MissingTokenError("op".into()))?;
 
-            return Ok(result.to_enum());
-        }
-
-        let missing_token = if column_name.is_none() {
-            "column_name"
-        } else if op.is_none() {
-            "op"
+        let value_or_column = if let Some(col2) = second_column {
+            OperatorValue::Column(col2)
+        } else if let Some(val) = value {
+            OperatorValue::Value(val)
         } else {
-            "value"
+            return Err(ParserError::MissingTokenError(
+                "value or column_name".into(),
+            ));
         };
 
-        Err(ParserError::MissingTokenError(missing_token.into()))
+        Ok((column_name, op, value_or_column))
     }
 
     fn construct_and(token: Pair<'_, Rule>) -> Result<And, ParserError> {
@@ -412,36 +452,12 @@ impl CommandParser {
         pair: Pair<'_, Rule>,
         db: &'a mut Database<K>,
     ) -> Result<AnyCommand<'a, K>, ParserError> {
-        let mut table_name: Option<&str> = None;
-        let mut key_value: Option<K> = None;
+        let table_name = Self::extract_table_name(&pair)?;
+        let key_value = Self::extract_key_value::<K>(&pair)?;
+
+        let table = db.get_table(&table_name)?;
 
         let command_str = pair.as_str().to_string();
-
-        for token in pair.into_inner() {
-            if let Some(value) = CommandParser::parse_value(&token)?
-                && let Some(key) = K::from_value(value)
-            {
-                key_value = Some(key);
-                continue;
-            }
-
-            match token.as_rule() {
-                Rule::table_name => {
-                    table_name = Some(token.as_str());
-                }
-                _ => return Err(ParserError::UnknownRuleError(token.as_str().into())),
-            }
-        }
-
-        let Some(table_name) = table_name else {
-            return Err(ParserError::MissingTokenError("table_name".into()));
-        };
-
-        let Some(key_value) = key_value else {
-            return Err(ParserError::MissingTokenError("key_value".into()));
-        };
-
-        let table = db.get_table(table_name)?;
 
         self.commands_parsed.push(command_str);
 
@@ -452,24 +468,23 @@ impl CommandParser {
         .into())
     }
 
+    fn extract_key_value<K: DatabaseKey>(pair: &Pair<'_, Rule>) -> Result<K, ParserError> {
+        for token in pair.clone().into_inner() {
+            if let Some(value) = Self::parse_value(&token)? {
+                if let Some(key) = K::from_value(value) {
+                    return Ok(key);
+                }
+            }
+        }
+
+        Err(ParserError::MissingTokenError("key_value".into()))
+    }
+
     fn parse_save_as<'a, K: DatabaseKey>(
         &'a self,
         pair: Pair<'_, Rule>,
     ) -> Result<AnyCommand<'a, K>, ParserError> {
-        let mut file_name: Option<String> = None;
-
-        for token in pair.into_inner() {
-            match token.as_rule() {
-                Rule::file_name => {
-                    file_name = Some(token.as_str().to_string());
-                }
-                _ => return Err(ParserError::UnknownRuleError(token.as_str().into())),
-            }
-        }
-
-        let Some(file_name) = file_name else {
-            return Err(ParserError::MissingTokenError("file_name".into()));
-        };
+        let file_name = Self::extract_file_name(&pair)?;
 
         let result = SaveAsCommand {
             file_name,
@@ -483,20 +498,7 @@ impl CommandParser {
         &self,
         pair: Pair<'_, Rule>,
     ) -> Result<AnyCommand<'_, K>, ParserError> {
-        let mut file_name: Option<String> = None;
-
-        for token in pair.into_inner() {
-            match token.as_rule() {
-                Rule::file_name => {
-                    file_name = Some(token.as_str().to_string());
-                }
-                _ => return Err(ParserError::UnknownRuleError(token.as_str().into())),
-            }
-        }
-
-        let Some(file_name) = file_name else {
-            return Err(ParserError::MissingTokenError("file_name".into()));
-        };
+        let file_name = Self::extract_file_name(&pair)?;
 
         let result = ReadFromCommand { file_name };
 

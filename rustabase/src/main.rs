@@ -16,48 +16,47 @@ fn main() {
     let mut command_parser = CommandParser::new();
 
     loop {
-        let mut line = String::new();
-
-        match stdin().read_line(&mut line) {
-            Ok(_) => (),
-            Err(e) => {
-                println!("{e}");
-                continue;
-            }
-        }
-
-        println!("\n\n");
-
-        let parse_result = command_parser.parse_command(&mut db, &line);
-
-        let command = match parse_result {
-            Err(e) => {
-                println!("{e}");
-                continue;
-            }
-            Ok(command) => command,
-        };
-
-        let result = match command.execute() {
-            Ok(res) => res,
-            Err(e) => {
-                println!("{e}");
-                continue;
-            }
-        };
-
-        match result {
-            CommandResult::Void => (),
-            CommandResult::RecordValueList(columns, records) => {
-                print_record_value_list(&columns, records);
-            }
-            CommandResult::CommandList(items) => {
-                execute_command_list(&mut db, &mut command_parser, items)
-            }
-        }
-
-        println!("Present tables: {:?}", db.get_table_names());
+        handle_user_input(&mut db, &mut command_parser);
     }
+}
+
+fn handle_user_input(db: &mut Database<i64>, command_parser: &mut CommandParser) {
+    let mut line = String::new();
+
+    if let Err(e) = stdin().read_line(&mut line) {
+        println!("{e}");
+        return;
+    }
+
+    println!("\n\n");
+
+    let parse_result = command_parser.parse_command(db, &line);
+
+    let command = match parse_result {
+        Err(e) => {
+            println!("{e}");
+            return;
+        }
+        Ok(command) => command,
+    };
+
+    let result = match command.execute() {
+        Ok(res) => res,
+        Err(e) => {
+            println!("{e}");
+            return;
+        }
+    };
+
+    match result {
+        CommandResult::Void => (),
+        CommandResult::RecordValueList(columns, records) => {
+            print_record_value_list(&columns, records);
+        }
+        CommandResult::CommandList(items) => execute_command_list(db, command_parser, items),
+    }
+
+    println!("Present tables: {:?}", db.get_table_names());
 }
 
 fn execute_command_list(

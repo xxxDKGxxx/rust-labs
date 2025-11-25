@@ -122,6 +122,15 @@ impl<K: DatabaseKey> Table<K> {
             return Err(TableError::InsertNotMatchingArgsLengthError);
         }
 
+        self.validate_columns(&column_names)?;
+        let key_value = self.extract_key_value(&column_names, &column_values)?;
+        let new_record = self.build_record(column_names, column_values)?;
+        self.insert_with_key(new_record, &key_value)?;
+
+        Ok(())
+    }
+
+    fn validate_columns(&self, column_names: &[String]) -> Result<(), TableError> {
         let missing_columns: Vec<String> = self
             .columns
             .keys()
@@ -133,6 +142,14 @@ impl<K: DatabaseKey> Table<K> {
             return Err(TableError::InsertMissingColumnsError(missing_columns));
         }
 
+        Ok(())
+    }
+
+    fn extract_key_value(
+        &self,
+        column_names: &[String],
+        column_values: &[Value],
+    ) -> Result<Value, TableError> {
         let key_idx = column_names.iter().position(|s| *s == self.key_name);
 
         let Some(key_idx) = key_idx else {
@@ -141,8 +158,14 @@ impl<K: DatabaseKey> Table<K> {
             ]));
         };
 
-        let key_value = column_values[key_idx].clone();
+        Ok(column_values[key_idx].clone())
+    }
 
+    fn build_record(
+        &self,
+        column_names: Vec<String>,
+        column_values: Vec<Value>,
+    ) -> Result<RecordBuilder, TableError> {
         let mut new_record = Record::new_builder();
 
         for (name, value) in column_names.into_iter().zip(column_values.into_iter()) {
@@ -160,9 +183,8 @@ impl<K: DatabaseKey> Table<K> {
 
             new_record = new_record.with_column(name, value);
         }
-        self.insert_with_key(new_record, &key_value)?;
 
-        Ok(())
+        Ok(new_record)
     }
 
     fn insert_with_key(
