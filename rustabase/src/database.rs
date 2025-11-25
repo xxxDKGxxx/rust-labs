@@ -9,12 +9,12 @@ pub mod key;
 pub mod table;
 
 #[derive(Error, Debug, PartialEq)]
-pub enum DatabaseError<K: DatabaseKey> {
+pub enum DatabaseError {
     #[error("Table named: {0} already exists")]
     TableAlreadyExistsError(String),
 
     #[error("Table error occured: {0}")]
-    TableError(#[from] TableError<K>),
+    TableError(#[from] TableError),
 
     #[error("Table {0} not found")]
     TableNotFoundError(String),
@@ -41,7 +41,7 @@ impl<K: DatabaseKey> Database<K> {
         key_name: String,
         fields: Vec<String>,
         types: Vec<ColumnType>,
-    ) -> Result<(), DatabaseError<K>> {
+    ) -> Result<(), DatabaseError> {
         if self
             .tables
             .iter()
@@ -64,19 +64,19 @@ impl<K: DatabaseKey> Database<K> {
         Ok(())
     }
 
-    pub fn get_table(&mut self, table_name: String) -> Result<&mut Table<K>, DatabaseError<K>> {
+    pub fn get_table(&mut self, table_name: &str) -> Result<&mut Table<K>, DatabaseError> {
         match self
             .tables
             .iter_mut()
             .find(|tab| tab.get_name() == table_name)
         {
             Some(tab) => Ok(tab),
-            None => Err(DatabaseError::TableNotFoundError(table_name)),
+            None => Err(DatabaseError::TableNotFoundError(table_name.into())),
         }
     }
 
     pub fn get_table_names(&self) -> Vec<&str> {
-        self.tables.iter().map(|t| t.get_name()).collect()
+        self.tables.iter().map(Table::get_name).collect()
     }
 }
 
@@ -119,7 +119,7 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(db.tables.len(), 1);
         assert_eq!(db.tables[0].get_name(), "Items".to_string());
-        assert_eq!(db.tables[0].get_columns().len(), 1);
+        assert_eq!(db.tables[0].get_columns().len(), 2);
     }
 
     #[test]
@@ -141,7 +141,7 @@ mod tests {
         let mut db = prepare_populated_database();
         let table_name = "Users".to_string();
 
-        let result = db.get_table(table_name.clone());
+        let result = db.get_table(&table_name);
 
         assert!(result.is_ok());
         let table = result.unwrap();
@@ -153,7 +153,7 @@ mod tests {
         let mut db = prepare_populated_database();
         let missing_name = "Orders".to_string();
 
-        let result = db.get_table(missing_name.clone());
+        let result = db.get_table(&missing_name);
 
         assert!(result.is_err());
         assert_eq!(

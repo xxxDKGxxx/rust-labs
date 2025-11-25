@@ -9,32 +9,36 @@ bool        = @{ "BOOL" }
 string      = @{ "STRING" }
 int         = @{ "INT" }
 float       = @{ "FLOAT" }
-op          = @{ "=" | "!=" | ">" | "<" | ">=" | "<=" }
-file_name   = @{ ASCII_ALPHANUMERIC+ }
+op          = @{ "=" | "!=" | ">=" | "<=" | ">" | "<" }
+file_name   = @{ (ASCII_ALPHANUMERIC | ".")+ }
 
 type = { bool | string | int | float }
 
-command = _{ (create_command | delete_command | select_query | save_as_command | read_from_command) ~ EOI }
+command = _{ (create_command | insert_command | delete_command | select_query | save_as_command | read_from_command) ~ EOI }
+
+insert_command = { "INSERT" ~ (field_value_pair ~ ",")* ~ field_value_pair ~ "INTO" ~ table_name }
 
 save_as_command   =  { "SAVE_AS" ~ file_name }
 read_from_command =  { "READ_FROM" ~ file_name }
 create_command    =  { "CREATE" ~ table_name ~ "KEY" ~ key_name ~ (fields)? }
 fields            = _{ "FIELDS" ~ (field_type_pair ~ ",")* ~ field_type_pair }
 field_type_pair   =  { field_name ~ ":" ~ type }
+field_value_pair  =  { field_name ~ "=" ~ value }
 
-delete_command = { "DELETE" ~ key_value ~ "FROM" ~ table_name }
+delete_command = { "DELETE" ~ value ~ "FROM" ~ table_name }
 
-select_query   =  { "SELECT" ~ column_names ~ "FROM" ~ table_name ~ where_clause? }
-column_names   =  { (column_name ~ ",")* ~ column_name }
-where_clause   =  { "WHERE" ~ expr }
-expr           = _{ or_expr }
-or_expr        =  { and_expr ~ ("OR" ~ and_expr)* }
-and_expr       =  { primary_expr ~ ("AND" ~ primary_expr)* }
-primary_expr   = _{ operator_expr | bracketed_expr }
-operator_expr  =  { column_name ~ op ~ value }
-value          = _{ bool_value | float_value | int_value | string_value | column_name }
-bool_value     =  { "true" | "false" }
-int_value      =  { "-"? ~ ASCII_DIGIT+ }
-float_value    =  { "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
-string_value   =  { "\"" ~ ASCII_ALPHANUMERIC* ~ "\"" }
-bracketed_expr = _{ "(" ~ expr ~ ")" }
+select_query        =  { "SELECT" ~ column_names ~ "FROM" ~ table_name ~ where_clause? }
+column_names        =  { (column_name ~ ",")* ~ column_name }
+where_clause        =  { "WHERE" ~ expr }
+expr                = _{ or_expr }
+or_expr             =  { and_expr ~ ("OR" ~ and_expr)* }
+and_expr            =  { primary_expr ~ ("AND" ~ primary_expr)* }
+primary_expr        = _{ operator_expr | bracketed_expr }
+operator_expr       =  { column_name ~ op ~ (value | column_name) }
+value               = _{ bool_value | float_value | int_value | string_value_quoted }
+bool_value          =  { "true" | "false" }
+int_value           =  { "-"? ~ ASCII_DIGIT+ }
+float_value         =  { "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+string_value_quoted = _{ "\"" ~ string_value ~ "\"" }
+string_value        = @{ ASCII_ALPHANUMERIC* }
+bracketed_expr      = _{ "(" ~ expr ~ ")" }

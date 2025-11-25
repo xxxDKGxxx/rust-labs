@@ -1,5 +1,5 @@
 use crate::{
-    commands::command::{Command, CommandError},
+    commands::command::{AnyCommand, Command, CommandError, CommandResult},
     database::{Database, key::DatabaseKey, table::ColumnType},
 };
 
@@ -11,8 +11,8 @@ pub struct CreateCommand<'a, K: DatabaseKey> {
     pub types: Vec<ColumnType>,
 }
 
-impl<'a, K: DatabaseKey> Command<K> for CreateCommand<'a, K> {
-    fn execute(&mut self) -> Result<(), CommandError<K>> {
+impl<K: DatabaseKey> Command for CreateCommand<'_, K> {
+    fn execute(self) -> Result<CommandResult, CommandError> {
         self.database.create_table(
             self.table_name.clone(),
             self.key_name.clone(),
@@ -20,7 +20,13 @@ impl<'a, K: DatabaseKey> Command<K> for CreateCommand<'a, K> {
             self.types.clone(),
         )?;
 
-        Ok(())
+        Ok(CommandResult::Void)
+    }
+}
+
+impl<'a, K: DatabaseKey> From<CreateCommand<'a, K>> for AnyCommand<'a, K> {
+    fn from(value: CreateCommand<'a, K>) -> Self {
+        Self::CreateCommand(value)
     }
 }
 
@@ -34,10 +40,10 @@ mod tests {
 
         let table_name = String::from("Users");
         let key_name = String::from("UserId");
-        let fields = vec![String::from("Name"), String::from("Age")];
+        let mut fields = vec![String::from("Name"), String::from("Age")];
         let types = vec![ColumnType::STRING, ColumnType::INT];
 
-        let mut command = CreateCommand {
+        let command = CreateCommand {
             database: &mut db,
             table_name: table_name.clone(),
             key_name: key_name.clone(),
@@ -47,9 +53,11 @@ mod tests {
 
         command.execute().unwrap();
 
-        let table = db.get_table("Users".into()).unwrap();
+        let table = db.get_table("Users").unwrap();
 
         let table_columns = table.get_columns();
+
+        fields.push(key_name.clone());
 
         assert!(table_columns.keys().into_iter().all(|c| fields.contains(c)));
 
@@ -75,7 +83,7 @@ mod tests {
         let fields = vec![String::from("Name"), String::from("Age")];
         let types = vec![ColumnType::STRING, ColumnType::INT];
 
-        let mut command1 = CreateCommand {
+        let command1 = CreateCommand {
             database: &mut db,
             table_name: table_name.clone(),
             key_name: key_name.clone(),
@@ -85,7 +93,7 @@ mod tests {
 
         command1.execute().unwrap();
 
-        let mut command2 = CreateCommand {
+        let command2 = CreateCommand {
             database: &mut db,
             table_name: table_name.clone(),
             key_name: key_name.clone(),
@@ -99,9 +107,9 @@ mod tests {
 
         assert_eq!(
             err,
-            CommandError::<i64>::DatabaseError(
-                crate::database::DatabaseError::TableAlreadyExistsError(table_name)
-            )
+            CommandError::DatabaseError(crate::database::DatabaseError::TableAlreadyExistsError(
+                table_name
+            ))
         );
     }
 
@@ -114,7 +122,7 @@ mod tests {
         let fields = vec![String::from("Age"), String::from("Age")];
         let types = vec![ColumnType::FLOAT, ColumnType::INT];
 
-        let mut command = CreateCommand {
+        let command = CreateCommand {
             database: &mut db,
             table_name,
             key_name,
@@ -128,7 +136,7 @@ mod tests {
 
         assert_eq!(
             err,
-            CommandError::<i64>::DatabaseError(crate::database::DatabaseError::TableError(
+            CommandError::DatabaseError(crate::database::DatabaseError::TableError(
                 crate::database::table::TableError::ColumnDefinedTwiceError {
                     column_name: "Age".into(),
                     first_type: ColumnType::FLOAT,

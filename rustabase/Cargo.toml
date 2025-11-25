@@ -5,5 +5,6 @@ edition = "2024"
 
 [dependencies]
 pest = "2.8.3"
+pest_ascii_tree = "0.1.0"
 pest_derive = "2.8.3"
 thiserror = "2.0.17"

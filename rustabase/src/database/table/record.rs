@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use thiserror::Error;
 
@@ -8,6 +8,18 @@ pub enum Value {
     STRING(String),
     INT(i64),
     FLOAT(f64),
+}
+
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::BOOL(b) => write!(f, "BOOL {b}"),
+            Value::STRING(s) => write!(f, "STRING {s}"),
+            Value::INT(i) => write!(f, "INT {i}"),
+            Value::FLOAT(fl) => write!(f, "FLOAT {fl}"),
+        }?;
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Error)]
@@ -91,7 +103,7 @@ impl Record {
     //     Ok(())
     // }
 
-    pub fn get_values(&self, column_names: Vec<&str>) -> Result<Vec<Value>, RecordError> {
+    pub fn get_values(&self, column_names: &Vec<&str>) -> Result<Vec<Value>, RecordError> {
         let results: Vec<Result<&Value, RecordError>> = column_names
             .iter()
             .map(|name| self.get_value(name))
@@ -146,8 +158,8 @@ impl Record {
 }
 
 impl RecordBuilder {
-    pub fn with_column(mut self, column_name: &str, column_value: Value) -> RecordBuilder {
-        if let Some(val) = self.record.values_map.get(column_name) {
+    pub fn with_column(mut self, column_name: String, column_value: Value) -> RecordBuilder {
+        if let Some(val) = self.record.values_map.get(&column_name) {
             self.errors.push(RecordError::ColumnDefinedTwiceError {
                 column_name: column_name.to_string(),
                 first_value: val.clone(),
@@ -156,16 +168,14 @@ impl RecordBuilder {
             return self;
         }
 
-        self.record
-            .values_map
-            .insert(column_name.to_string(), column_value);
+        self.record.values_map.insert(column_name, column_value);
         self
     }
 
     pub fn build(self) -> Result<Record, RecordError> {
         if let Some(err) = self.errors.into_iter().next() {
             return Err(err);
-        };
+        }
 
         Ok(self.record)
     }
@@ -200,10 +210,10 @@ mod tests {
         let v7 = Value::FLOAT(3.5f64);
         let v8 = Value::STRING("Test str 2".to_string());
 
-        assert_eq!(v1.is_the_same_type_as(&v5), true);
-        assert_eq!(v2.is_the_same_type_as(&v6), true);
-        assert_eq!(v3.is_the_same_type_as(&v7), true);
-        assert_eq!(v4.is_the_same_type_as(&v8), true);
+        assert!(v1.is_the_same_type_as(&v5));
+        assert!(v2.is_the_same_type_as(&v6));
+        assert!(v3.is_the_same_type_as(&v7));
+        assert!(v4.is_the_same_type_as(&v8));
     }
 
     #[test]
@@ -218,30 +228,30 @@ mod tests {
         let v7 = Value::FLOAT(3.5f64);
         let v8 = Value::STRING("Test str 2".to_string());
 
-        assert_eq!(v1.is_the_same_type_as(&v6), false);
-        assert_eq!(v1.is_the_same_type_as(&v7), false);
-        assert_eq!(v1.is_the_same_type_as(&v8), false);
+        assert!(!v1.is_the_same_type_as(&v6));
+        assert!(!v1.is_the_same_type_as(&v7));
+        assert!(!v1.is_the_same_type_as(&v8));
 
-        assert_eq!(v2.is_the_same_type_as(&v5), false);
-        assert_eq!(v2.is_the_same_type_as(&v7), false);
-        assert_eq!(v2.is_the_same_type_as(&v8), false);
+        assert!(!v2.is_the_same_type_as(&v5));
+        assert!(!v2.is_the_same_type_as(&v7));
+        assert!(!v2.is_the_same_type_as(&v8));
 
-        assert_eq!(v3.is_the_same_type_as(&v5), false);
-        assert_eq!(v3.is_the_same_type_as(&v6), false);
-        assert_eq!(v3.is_the_same_type_as(&v8), false);
+        assert!(!v3.is_the_same_type_as(&v5));
+        assert!(!v3.is_the_same_type_as(&v6));
+        assert!(!v3.is_the_same_type_as(&v8));
 
-        assert_eq!(v4.is_the_same_type_as(&v5), false);
-        assert_eq!(v4.is_the_same_type_as(&v6), false);
-        assert_eq!(v4.is_the_same_type_as(&v7), false);
+        assert!(!v4.is_the_same_type_as(&v5));
+        assert!(!v4.is_the_same_type_as(&v6));
+        assert!(!v4.is_the_same_type_as(&v7));
     }
 
     #[test]
     fn record_building_test() {
         let record = Record::new_builder()
-            .with_column("Name", Value::STRING(String::from("John")))
-            .with_column("Age", Value::INT(24))
-            .with_column("Married", Value::BOOL(false))
-            .with_column("Result", Value::FLOAT(0.75f64))
+            .with_column("Name".into(), Value::STRING(String::from("John")))
+            .with_column("Age".into(), Value::INT(24))
+            .with_column("Married".into(), Value::BOOL(false))
+            .with_column("Result".into(), Value::FLOAT(0.75f64))
             .build()
             .unwrap();
 
@@ -263,13 +273,13 @@ mod tests {
     #[test]
     fn record_building_failure_test() {
         let record = Record::new_builder()
-            .with_column("Name", Value::STRING(String::from("John")))
-            .with_column("Name", Value::INT(24))
-            .with_column("Married", Value::BOOL(false))
-            .with_column("Result", Value::FLOAT(0.75f64))
+            .with_column("Name".into(), Value::STRING(String::from("John")))
+            .with_column("Name".into(), Value::INT(24))
+            .with_column("Married".into(), Value::BOOL(false))
+            .with_column("Result".into(), Value::FLOAT(0.75f64))
             .build();
 
-        assert_eq!(record.is_err(), true);
+        assert!(record.is_err());
 
         let err = record.unwrap_err();
 
@@ -286,8 +296,8 @@ mod tests {
     #[test]
     fn record_get_value_success_test() {
         let record = Record::new_builder()
-            .with_column("A", Value::INT(10))
-            .with_column("B", Value::STRING("Hello".to_string()))
+            .with_column("A".into(), Value::INT(10))
+            .with_column("B".into(), Value::STRING("Hello".to_string()))
             .build()
             .unwrap();
 
@@ -311,16 +321,16 @@ mod tests {
     #[test]
     fn record_get_values_success_test() {
         let record = Record::new_builder()
-            .with_column("ID", Value::INT(1))
-            .with_column("Status", Value::STRING("Active".to_string()))
-            .with_column("Price", Value::FLOAT(99.99f64))
+            .with_column("ID".into(), Value::INT(1))
+            .with_column("Status".into(), Value::STRING("Active".to_string()))
+            .with_column("Price".into(), Value::FLOAT(99.99f64))
             .build()
             .unwrap();
 
         let column_names = vec!["Status", "Price"];
         let expected_values = vec![Value::STRING("Active".to_string()), Value::FLOAT(99.99f64)];
 
-        let result = record.get_values(column_names);
+        let result = record.get_values(&column_names);
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), expected_values);
@@ -329,14 +339,14 @@ mod tests {
     #[test]
     fn record_get_values_failure_test() {
         let record = Record::new_builder()
-            .with_column("ID", Value::INT(1))
-            .with_column("Status", Value::STRING("Active".to_string()))
+            .with_column("ID".into(), Value::INT(1))
+            .with_column("Status".into(), Value::STRING("Active".to_string()))
             .build()
             .unwrap();
 
         let column_names = vec!["ID", "Missing1", "Status", "Missing2"];
 
-        let result = record.get_values(column_names);
+        let result = record.get_values(&column_names);
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -349,6 +359,6 @@ mod tests {
             panic!("Expected InvalidColumnNameError");
         };
 
-        assert!(error_name == "Missing1".to_string() || error_name == "Missing2".to_string());
+        assert!(error_name == "Missing1" || error_name == "Missing2");
     }
 }

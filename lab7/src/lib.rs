@@ -170,7 +170,10 @@ pub fn compose_all_loop(fns: &[fn(i32) -> i32]) -> impl Fn(i32) -> i32 {
 }
 
 pub fn compose_all(fns: &[fn(i32) -> i32]) -> impl Fn(i32) -> i32 {
-    move |x| -> i32 { fns.iter().fold(x, |curr, f| f(curr)) }
+    |x| -> i32 {
+        println!("test");
+        fns.iter().fold(x, |curr, f| f(curr))
+    }
 }
 
 pub fn make_counter(start: i64) -> impl FnMut() -> i64 {
