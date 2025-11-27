@@ -44,6 +44,24 @@ mod tests {
 
         table
     }
+    fn prepare_test_table_string() -> Table<String> {
+        let mut table = Table::new_builder("Products".to_string(), "ProductId".to_string())
+            .with_column("Name".to_string(), ColumnType::STRING)
+            .build()
+            .unwrap();
+
+        table
+            .insert(
+                vec!["ProductId".to_string(), "Name".to_string()],
+                vec![
+                    Value::STRING("product-1".to_string()),
+                    Value::STRING("Laptop".to_string()),
+                ],
+            )
+            .unwrap();
+
+        table
+    }
 
     #[test]
     fn delete_command_success_test() {
@@ -65,14 +83,14 @@ mod tests {
     }
 
     #[test]
-    fn delete_command_key_not_found_error_test() {
-        let mut table = prepare_test_table();
+    fn delete_command_key_not_found_error_test_string() {
+        let mut table = prepare_test_table_string();
 
-        let missing_key = 101;
+        let missing_key = "missing-product".to_string();
 
         let command = DeleteCommand {
             table: &mut table,
-            key: missing_key,
+            key: missing_key.clone(),
         };
 
         let result = command.execute();
@@ -86,5 +104,47 @@ mod tests {
             ))
         );
         assert_eq!(table.filter(|_| true).len(), 1);
+    }
+
+    #[test]
+    fn delete_command_key_not_found_error_test() {
+        let mut table = prepare_test_table();
+
+        let missing_key = 101;
+
+        let command = DeleteCommand {
+            table: &mut table,
+            key: missing_key.clone(),
+        };
+
+        let result = command.execute();
+
+        assert!(result.is_err());
+
+        assert_eq!(
+            result.unwrap_err(),
+            CommandError::TableError(crate::database::table::TableError::KeyNotFoundError(
+                missing_key.to_value()
+            ))
+        );
+        assert_eq!(table.filter(|_| true).len(), 1);
+    }
+    #[test]
+    fn delete_command_success_test_string() {
+        let mut table = prepare_test_table_string();
+        let key_to_delete = "product-1".to_string();
+
+        assert_eq!(table.filter(|_| true).len(), 1);
+
+        let command = DeleteCommand {
+            table: &mut table,
+            key: key_to_delete,
+        };
+
+        let result = command.execute();
+
+        assert!(result.is_ok());
+
+        assert_eq!(table.filter(|_| true).len(), 0);
     }
 }

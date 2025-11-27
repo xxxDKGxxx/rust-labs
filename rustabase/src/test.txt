@@ -1,2 +1,0 @@
-CREATE Users KEY UserId
-INSERT UserId=1 INTO Users

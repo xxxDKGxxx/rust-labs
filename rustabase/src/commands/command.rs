@@ -33,6 +33,9 @@ pub enum CommandError {
     #[error("Unknown operator: {0}")]
     UnknownOperatorError(String),
 
+    #[error("Could not compare {0} to {1}")]
+    OrderingError(Value, Value),
+
     #[error("Invalid value for {column_name}, expected {expected_type}, got {got_type}")]
     InvalidValueError {
         column_name: String,

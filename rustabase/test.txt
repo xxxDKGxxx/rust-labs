@@ -1,0 +1,13 @@
+CREATE Orders KEY OrderId FIELDS OrderName: STRING, OrderStatus: STRING, OrderCount: INT, OrderPrice: FLOAT, OrderCompleted: BOOL
+
+INSERT OrderId=1, OrderName="Latop", OrderStatus="In delivery", OrderCount=2, OrderPrice=3000.0, OrderCompleted=false INTO Orders
+INSERT OrderId=2, OrderName="Mechanical Keyboard", OrderStatus="Processing", OrderCount=1, OrderPrice=450.0, OrderCompleted=false INTO Orders
+INSERT OrderId=3, OrderName="Noise-Cancelling Headphones", OrderStatus="Shipped", OrderCount=1, OrderPrice=1200.0, OrderCompleted=false INTO Orders
+INSERT OrderId=4, OrderName="Gaming Mouse", OrderStatus="Delivered", OrderCount=3, OrderPrice=250.0, OrderCompleted=true INTO Orders
+INSERT OrderId=5, OrderName="USB-C Hub", OrderStatus="In warehouse", OrderCount=5, OrderPrice=80.0, OrderCompleted=false INTO Orders
+INSERT OrderId=6, OrderName="4K Monitor", OrderStatus="Returned", OrderCount=1, OrderPrice=2200.0, OrderCompleted=false INTO Orders
+INSERT OrderId=7, OrderName="Smartwatch", OrderStatus="Delivered", OrderCount=2, OrderPrice=900.0, OrderCompleted=true INTO Orders
+INSERT OrderId=8, OrderName="External SSD", OrderStatus="Preparing for shipment", OrderCount=4, OrderPrice=600.0, OrderCompleted=false INTO Orders
+INSERT OrderId=9, OrderName="Wireless Charger", OrderStatus="Delivered", OrderCount=3, OrderPrice=120.0, OrderCompleted=true INTO Orders
+INSERT OrderId=10, OrderName="Graphics Tablet", OrderStatus="Processing", OrderCount=1, OrderPrice=750.0, OrderCompleted=false INTO Orders
+INSERT OrderId=11, OrderName="Bluetooth Speaker", OrderStatus="Cancelled", OrderCount=1, OrderPrice=300.0, OrderCompleted=false INTO Orders

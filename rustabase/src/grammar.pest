@@ -10,7 +10,7 @@ string      = @{ "STRING" }
 int         = @{ "INT" }
 float       = @{ "FLOAT" }
 op          = @{ "=" | "!=" | ">=" | "<=" | ">" | "<" }
-file_name   = @{ (ASCII_ALPHANUMERIC | ".")+ }
+file_name   = @{ (!"\"" ~ (ANY | "."))+ }
 
 type = { bool | string | int | float }
 
@@ -36,9 +36,9 @@ and_expr            =  { primary_expr ~ ("AND" ~ primary_expr)* }
 primary_expr        = _{ operator_expr | bracketed_expr }
 operator_expr       =  { column_name ~ op ~ (value | column_name) }
 value               = _{ bool_value | float_value | int_value | string_value_quoted }
-bool_value          =  { "true" | "false" }
-int_value           =  { "-"? ~ ASCII_DIGIT+ }
-float_value         =  { "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+bool_value          = @{ "true" | "false" }
+int_value           =  @{ "-"? ~ ASCII_DIGIT+ }
+float_value         = @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
 string_value_quoted = _{ "\"" ~ string_value ~ "\"" }
-string_value        = @{ ASCII_ALPHANUMERIC* }
+string_value        = @{ (!"\"" ~ ANY)* }
 bracketed_expr      = _{ "(" ~ expr ~ ")" }

@@ -24,12 +24,60 @@ impl<'a> Command for SaveAsCommand<'a> {
         };
 
         for line in self.lines.iter() {
-            match file.write_all(line.as_bytes()) {
+            match write!(file, "{line}\n") {
                 Ok(_) => (),
                 Err(e) => return Err(CommandError::IoError(e.to_string())),
             }
         }
 
         Ok(CommandResult::Void)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+
+    #[test]
+    fn save_as_command_success_test() {
+        let mut commands = vec![
+            "CREATE Users KEY UserId FIELDS Firstname:STRING, Lastname:STRING, Age:INT, Married:BOOL".to_string(),
+            "INSERT UserId=1, Firstname=\"John\", Lastname=\"Doe\", Age=16, Married=false INTO Users".to_string(),
+        ];
+
+        let file_name = "test_save_i64.txt".to_string();
+        let command = SaveAsCommand {
+            file_name: file_name.clone(),
+            lines: &mut commands,
+        };
+
+        let result = command.execute();
+        assert!(result.is_ok());
+
+        let contents = fs::read_to_string(&file_name).unwrap();
+        assert!(contents.contains("CREATE Users KEY UserId"));
+        assert!(contents.contains("INSERT UserId=1"));
+
+        fs::remove_file(&file_name).unwrap();
+    }
+
+    #[test]
+    fn save_as_command_failure_test() {
+        let mut commands = vec!["Some command".to_string()];
+
+        let file_name = "/nonexistent/directory/test_failure.txt".to_string();
+        let command = SaveAsCommand {
+            file_name,
+            lines: &mut commands,
+        };
+
+        let result = command.execute();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            CommandError::IoError(_) => (),
+            _ => panic!("Expected IO error"),
+        }
     }
 }

@@ -58,6 +58,10 @@ impl CommandParser {
         }
     }
 
+    pub fn remove_last_saved_line(&mut self) {
+        self.commands_parsed.pop();
+    }
+
     pub fn parse_command<'a, K: DatabaseKey>(
         &'a mut self,
         db: &'a mut Database<K>,
@@ -99,7 +103,7 @@ impl CommandParser {
     fn extract_file_name(pair: &Pair<'_, Rule>) -> Result<String, ParserError> {
         for inner_pair in pair.clone().into_inner() {
             if inner_pair.as_rule() == Rule::file_name {
-                return Ok(inner_pair.as_str().to_string());
+                return Ok(inner_pair.as_str().trim().to_string());
             }
         }
         Err(ParserError::MissingTokenError("file_name".into()))
@@ -144,9 +148,9 @@ impl CommandParser {
         let mut fields = Vec::<String>::new();
         let mut types = Vec::<ColumnType>::new();
 
-        for create_pair in pair.clone().into_inner() {
-            if create_pair.as_rule() == Rule::field_type_pair {
-                Self::parse_field_type(&mut fields, &mut types, create_pair)?;
+        for token in pair.clone().into_inner() {
+            if token.as_rule() == Rule::field_type_pair {
+                Self::parse_field_type(&mut fields, &mut types, token)?;
             }
         }
 
@@ -226,7 +230,6 @@ impl CommandParser {
                         return Err(ParserError::Error(e.to_string()));
                     }
                 };
-
                 Ok(Some(Value::INT(value)))
             }
             Rule::float_value => {
@@ -234,7 +237,6 @@ impl CommandParser {
                     Ok(f) => f,
                     Err(e) => return Err(ParserError::Error(e.to_string())),
                 };
-
                 Ok(Some(Value::FLOAT(value)))
             }
             Rule::string_value => Ok(Some(Value::STRING(token.as_str().into()))),
@@ -243,7 +245,6 @@ impl CommandParser {
                     Ok(v) => v,
                     Err(e) => return Err(ParserError::Error(e.to_string())),
                 };
-
                 Ok(Some(Value::BOOL(value)))
             }
             _ => Ok(None),
@@ -374,14 +375,33 @@ impl CommandParser {
         }
     }
 
+    fn parse_operator_pair<'a>(
+        column_name: Option<&'a str>,
+        op: Option<&'a str>,
+        value: Option<Value>,
+        second_column: Option<&'a str>,
+    ) -> Result<(&'a str, &'a str, OperatorValue<'a>), ParserError> {
+        let column_name =
+            column_name.ok_or_else(|| ParserError::MissingTokenError("column_name".into()))?;
+        let op = op.ok_or_else(|| ParserError::MissingTokenError("op".into()))?;
+        let value_or_column = if let Some(col2) = second_column {
+            OperatorValue::Column(col2)
+        } else if let Some(val) = value {
+            OperatorValue::Value(val)
+        } else {
+            return Err(ParserError::MissingTokenError(
+                "value or column_name".into(),
+            ));
+        };
+        Ok((column_name, op, value_or_column))
+    }
+
     fn parse_operator_components<'a>(
         token: Pair<'a, Rule>,
     ) -> Result<(&'a str, &'a str, OperatorValue<'a>), ParserError> {
         let mut column_name: Option<&str> = None;
         let mut op: Option<&str> = None;
-        let mut value: Option<Value> = None;
-        let mut second_column: Option<&str> = None;
-
+        let (mut value, mut second_column) = (None, None);
         for operator_token in token.into_inner() {
             if let Some(val) = Self::parse_value(&operator_token)? {
                 value = Some(val);
@@ -403,21 +423,8 @@ impl CommandParser {
                 }
             }
         }
-
-        let column_name =
-            column_name.ok_or_else(|| ParserError::MissingTokenError("column_name".into()))?;
-        let op = op.ok_or_else(|| ParserError::MissingTokenError("op".into()))?;
-
-        let value_or_column = if let Some(col2) = second_column {
-            OperatorValue::Column(col2)
-        } else if let Some(val) = value {
-            OperatorValue::Value(val)
-        } else {
-            return Err(ParserError::MissingTokenError(
-                "value or column_name".into(),
-            ));
-        };
-
+        let (column_name, op, value_or_column) =
+            CommandParser::parse_operator_pair(column_name, op, value, second_column)?;
         Ok((column_name, op, value_or_column))
     }
 
@@ -453,7 +460,7 @@ impl CommandParser {
         db: &'a mut Database<K>,
     ) -> Result<AnyCommand<'a, K>, ParserError> {
         let table_name = Self::extract_table_name(&pair)?;
-        let key_value = Self::extract_key_value::<K>(&pair)?;
+        let key_value = Self::extract_key_as_value::<K>(&pair)?;
 
         let table = db.get_table(&table_name)?;
 
@@ -468,12 +475,12 @@ impl CommandParser {
         .into())
     }
 
-    fn extract_key_value<K: DatabaseKey>(pair: &Pair<'_, Rule>) -> Result<K, ParserError> {
+    fn extract_key_as_value<K: DatabaseKey>(pair: &Pair<'_, Rule>) -> Result<K, ParserError> {
         for token in pair.clone().into_inner() {
-            if let Some(value) = Self::parse_value(&token)? {
-                if let Some(key) = K::from_value(value) {
-                    return Ok(key);
-                }
+            if let Some(value) = Self::parse_value(&token)?
+                && let Some(key) = K::from_value(value)
+            {
+                return Ok(key);
             }
         }
 
@@ -481,14 +488,14 @@ impl CommandParser {
     }
 
     fn parse_save_as<'a, K: DatabaseKey>(
-        &'a self,
+        &'a mut self,
         pair: Pair<'_, Rule>,
     ) -> Result<AnyCommand<'a, K>, ParserError> {
         let file_name = Self::extract_file_name(&pair)?;
 
         let result = SaveAsCommand {
             file_name,
-            lines: &self.commands_parsed,
+            lines: &mut self.commands_parsed,
         };
 
         Ok(result.into())
@@ -503,6 +510,12 @@ impl CommandParser {
         let result = ReadFromCommand { file_name };
 
         Ok(result.into())
+    }
+}
+
+impl Default for CommandParser {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -627,7 +640,6 @@ mod tests {
         let mut parser = prepare_parser();
         let mut db = prepare_db();
 
-        // Najpierw stworzyć tabelę
         let create_str = "CREATE Users KEY UserId FIELDS Age: INT";
         parser
             .parse_command(&mut db, create_str)
@@ -652,7 +664,6 @@ mod tests {
         let mut parser = prepare_parser();
         let mut db = prepare_db();
 
-        // Najpierw stworzyć tabelę
         let create_str = "CREATE Users KEY UserId FIELDS Age: INT, Name: STRING";
         parser
             .parse_command(&mut db, create_str)
@@ -677,7 +688,6 @@ mod tests {
         let mut parser = prepare_parser();
         let mut db = prepare_db();
 
-        // Najpierw stworzyć tabelę
         let create_str = "CREATE Users KEY UserId FIELDS Age: INT, Status: STRING";
         parser
             .parse_command(&mut db, create_str)
@@ -702,7 +712,6 @@ mod tests {
         let mut parser = prepare_parser();
         let mut db = prepare_db();
 
-        // Najpierw stworzyć tabelę
         let create_str = "CREATE Users KEY UserId FIELDS Age: INT, Status: STRING";
         parser
             .parse_command(&mut db, create_str)
@@ -727,7 +736,6 @@ mod tests {
         let mut parser = prepare_parser();
         let mut db = prepare_db();
 
-        // Najpierw stworzyć tabelę
         let create_str = "CREATE Users KEY UserId FIELDS Age: INT, Score: FLOAT, Active: BOOL";
         parser
             .parse_command(&mut db, create_str)
@@ -753,7 +761,6 @@ mod tests {
         let mut parser = prepare_parser();
         let mut db = prepare_db();
 
-        // Najpierw stworzyć tabelę
         let create_str = "CREATE Users KEY UserId FIELDS Age: INT, MinAge: INT";
         parser
             .parse_command(&mut db, create_str)
@@ -778,7 +785,6 @@ mod tests {
         let mut parser = prepare_parser();
         let mut db = prepare_db();
 
-        // Najpierw stworzyć tabelę
         let create_str = "CREATE Users KEY UserId FIELDS Status: STRING";
         parser
             .parse_command(&mut db, create_str)

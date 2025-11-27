@@ -8,6 +8,11 @@ use crate::database::{
 pub mod key;
 pub mod table;
 
+pub enum AnyDatabase {
+    StringDatabase(Database<String>),
+    I64Database(Database<i64>),
+}
+
 #[derive(Error, Debug, PartialEq)]
 pub enum DatabaseError {
     #[error("Table named: {0} already exists")]
@@ -34,7 +39,6 @@ impl<K: DatabaseKey> Database<K> {
     pub fn new() -> Self {
         Self { tables: Vec::new() }
     }
-
     pub fn create_table(
         &mut self,
         table_name: String,

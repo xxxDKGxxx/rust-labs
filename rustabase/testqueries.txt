@@ -1,0 +1,1 @@
+SELECT OrderId, OrderName, OrderPrice, OrderStatus, OrderCount, OrderCompleted FROM Orders WHERE OrderPrice < 3000.0 AND (OrderCompleted=true OR OrderCount > 1)

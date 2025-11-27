@@ -82,27 +82,6 @@ impl Record {
         }
     }
 
-    // fn update_value(&mut self, column_name: &str, new_value: Value) -> Result<(), RecordError> {
-    //     let curr_value = match self.values_map.get(column_name) {
-    //         Some(val) => val,
-    //         None => return Err(RecordError::InvalidColumnNameError(column_name.to_string())),
-    //     };
-
-    //     if !curr_value.is_the_same_type_as(&new_value) {
-    //         return Err(RecordError::InvalidColumnTypeError(
-    //             column_name.to_string(),
-    //             curr_value.type_name(),
-    //             new_value.type_name(),
-    //         ));
-    //     }
-
-    //     self.values_map
-    //         .entry(column_name.to_string())
-    //         .and_modify(|v| *v = new_value);
-
-    //     Ok(())
-    // }
-
     pub fn get_values(&self, column_names: &Vec<&str>) -> Result<Vec<Value>, RecordError> {
         let results: Vec<Result<&Value, RecordError>> = column_names
             .iter()
@@ -125,36 +104,6 @@ impl Record {
 
         Ok(successes)
     }
-
-    // fn update_values(
-    //     &mut self,
-    //     column_names: Vec<&str>,
-    //     column_values: Vec<Value>,
-    // ) -> Result<(), Vec<RecordError>> {
-    //     if column_names.len() != column_values.len() {
-    //         return Err(vec![RecordError::NotMatchingColumnNamesAndValuesError]);
-    //     }
-
-    //     let results: Vec<Result<(), RecordError>> = column_names
-    //         .into_iter()
-    //         .zip(column_values.into_iter())
-    //         .map(|pair| self.update_value(pair.0, pair.1))
-    //         .collect();
-
-    //     let errors: Vec<RecordError> = results
-    //         .iter()
-    //         .filter_map(|res| match res {
-    //             Err(err) => Some(err.clone()),
-    //             _ => None,
-    //         })
-    //         .collect();
-
-    //     if errors.len() != 0 {
-    //         return Err(errors);
-    //     }
-
-    //     Ok(())
-    // }
 }
 
 impl RecordBuilder {

@@ -39,6 +39,13 @@ mod tests {
             .build()
             .unwrap()
     }
+    fn prepare_test_table_string() -> Table<String> {
+        Table::new_builder("Orders".to_string(), "OrderId".to_string())
+            .with_column("ClientName".to_string(), ColumnType::STRING)
+            .with_column("Capacity".to_string(), ColumnType::INT)
+            .build()
+            .unwrap()
+    }
 
     #[test]
     fn insert_command_success_test() {
@@ -46,7 +53,6 @@ mod tests {
 
         let command = InsertCommand {
             table: &mut table,
-            // Dodano OrderId do pól i wartości
             fields: vec![
                 "OrderId".to_string(),
                 "ClientName".to_string(),
@@ -62,8 +68,7 @@ mod tests {
         let result = command.execute();
 
         assert!(result.is_ok());
-        // Columns: OrderId, ClientName, Capacity
-        assert_eq!(table.get_columns().len(), 3); // get_columns zwraca tylko kolumny "dane", bez klucza, zależnie od implementacji, ale tu asercja była 2
+        assert_eq!(table.get_columns().len(), 3);
 
         let records = table.filter(|r| {
             r.get_value("ClientName")
@@ -73,6 +78,43 @@ mod tests {
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].get_value("Capacity").unwrap(), &Value::INT(100));
+    }
+
+    #[test]
+    fn insert_command_multiple_success_test_string() {
+        let mut table = prepare_test_table_string();
+
+        let cmd1 = InsertCommand {
+            table: &mut table,
+            fields: vec![
+                "OrderId".to_string(),
+                "ClientName".to_string(),
+                "Capacity".to_string(),
+            ],
+            values: vec![
+                Value::STRING("order-1".to_string()),
+                Value::STRING("Client 1".to_string()),
+                Value::INT(50),
+            ],
+        };
+        assert!(cmd1.execute().is_ok());
+
+        let cmd2 = InsertCommand {
+            table: &mut table,
+            fields: vec![
+                "Capacity".to_string(),
+                "OrderId".to_string(),
+                "ClientName".to_string(),
+            ],
+            values: vec![
+                Value::INT(200),
+                Value::STRING("order-2".to_string()),
+                Value::STRING("Client 2".to_string()),
+            ],
+        };
+        assert!(cmd2.execute().is_ok());
+
+        assert_eq!(table.filter(|_| true).len(), 2);
     }
 
     #[test]
@@ -88,7 +130,7 @@ mod tests {
             ],
             values: vec![
                 Value::INT(1),
-                Value::STRING("Klient 1".to_string()),
+                Value::STRING("Client 1".to_string()),
                 Value::INT(50),
             ],
         };
@@ -96,7 +138,6 @@ mod tests {
 
         let cmd2 = InsertCommand {
             table: &mut table,
-            // Kolejność kolumn zmieniona, OrderId w środku/na początku - ważne że jest
             fields: vec![
                 "Capacity".to_string(),
                 "OrderId".to_string(),
@@ -105,7 +146,7 @@ mod tests {
             values: vec![
                 Value::INT(200),
                 Value::INT(2),
-                Value::STRING("Klient 2".to_string()),
+                Value::STRING("Client 2".to_string()),
             ],
         };
         assert!(cmd2.execute().is_ok());
@@ -117,11 +158,10 @@ mod tests {
     fn insert_command_missing_columns_error_test() {
         let mut table = prepare_test_table();
 
-        // Podajemy OrderId, ale brakuje Capacity
         let command = InsertCommand {
             table: &mut table,
             fields: vec!["OrderId".to_string(), "ClientName".to_string()],
-            values: vec![Value::INT(1), Value::STRING("Niekompletny".to_string())],
+            values: vec![Value::INT(1), Value::STRING("Incomplete".to_string())],
         };
 
         let result = command.execute();
@@ -145,7 +185,7 @@ mod tests {
         let command = InsertCommand {
             table: &mut table,
             fields: vec![
-                "OrderId".to_string(), // Ważne: Klucz musi być, żeby test doszedł do sprawdzania nazw kolumn
+                "OrderId".to_string(),
                 "ClientName".to_string(),
                 "Capacity".to_string(),
                 "Discount".to_string(),
@@ -183,7 +223,7 @@ mod tests {
             values: vec![
                 Value::INT(1),
                 Value::STRING("Test".to_string()),
-                Value::STRING("Dużo".to_string()), // Błąd typu tutaj
+                Value::STRING("Many".to_string()),
             ],
         };
 
@@ -200,5 +240,37 @@ mod tests {
                 }
             )
         )
+    }
+
+    #[test]
+    fn insert_command_success_test_string() {
+        let mut table = prepare_test_table_string();
+
+        let command = InsertCommand {
+            table: &mut table,
+            fields: vec![
+                "OrderId".to_string(),
+                "ClientName".to_string(),
+                "Capacity".to_string(),
+            ],
+            values: vec![
+                Value::STRING("order-1".to_string()),
+                Value::STRING("Firma ABC".to_string()),
+                Value::INT(100),
+            ],
+        };
+
+        let result = command.execute();
+
+        assert!(result.is_ok());
+
+        let records = table.filter(|r| {
+            r.get_value("ClientName")
+                .map(|v| v == &Value::STRING("Firma ABC".to_string()))
+                .unwrap_or(false)
+        });
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].get_value("Capacity").unwrap(), &Value::INT(100));
     }
 }

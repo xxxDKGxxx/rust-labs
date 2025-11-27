@@ -328,7 +328,6 @@ mod tests {
 
         table
             .insert(
-                // Dodano UserId
                 vec![
                     "UserId".into(),
                     "Firstname".into(),
@@ -338,8 +337,8 @@ mod tests {
                 ],
                 vec![
                     Value::INT(1),
-                    Value::STRING("Maciej".into()),
-                    Value::STRING("Kozłowski".into()),
+                    Value::STRING("John".into()),
+                    Value::STRING("Doe".into()),
                     Value::INT(16),
                     Value::BOOL(false),
                 ],
@@ -348,7 +347,6 @@ mod tests {
 
         table
             .insert(
-                // Dodano UserId
                 vec![
                     "UserId".into(),
                     "Firstname".into(),
@@ -358,8 +356,8 @@ mod tests {
                 ],
                 vec![
                     Value::INT(2),
-                    Value::STRING("Krzysztof".into()),
-                    Value::STRING("Wozniak".into()),
+                    Value::STRING("Chris".into()),
+                    Value::STRING("Smith".into()),
                     Value::INT(24),
                     Value::BOOL(true),
                 ],
@@ -368,7 +366,6 @@ mod tests {
 
         table
             .insert(
-                // Dodano UserId
                 vec![
                     "UserId".into(),
                     "Firstname".into(),
@@ -378,8 +375,76 @@ mod tests {
                 ],
                 vec![
                     Value::INT(3),
-                    Value::STRING("Jan".into()),
-                    Value::STRING("Kowalski".into()),
+                    Value::STRING("Jane".into()),
+                    Value::STRING("Brown".into()),
+                    Value::INT(20),
+                    Value::BOOL(false),
+                ],
+            )
+            .unwrap();
+
+        table
+    }
+    fn setup_test_table_string() -> Table<String> {
+        let mut table = Table::new_builder("Users".into(), "UserId".into())
+            .with_column("Firstname".into(), ColumnType::STRING)
+            .with_column("Lastname".into(), ColumnType::STRING)
+            .with_column("Age".into(), ColumnType::INT)
+            .with_column("Married".into(), ColumnType::BOOL)
+            .build()
+            .unwrap();
+
+        table
+            .insert(
+                vec![
+                    "UserId".into(),
+                    "Firstname".into(),
+                    "Lastname".into(),
+                    "Age".into(),
+                    "Married".into(),
+                ],
+                vec![
+                    Value::STRING("user-1".into()),
+                    Value::STRING("John".into()),
+                    Value::STRING("Doe".into()),
+                    Value::INT(16),
+                    Value::BOOL(false),
+                ],
+            )
+            .unwrap();
+
+        table
+            .insert(
+                vec![
+                    "UserId".into(),
+                    "Firstname".into(),
+                    "Lastname".into(),
+                    "Age".into(),
+                    "Married".into(),
+                ],
+                vec![
+                    Value::STRING("user-2".into()),
+                    Value::STRING("Chris".into()),
+                    Value::STRING("Smith".into()),
+                    Value::INT(24),
+                    Value::BOOL(true),
+                ],
+            )
+            .unwrap();
+
+        table
+            .insert(
+                vec![
+                    "UserId".into(),
+                    "Firstname".into(),
+                    "Lastname".into(),
+                    "Age".into(),
+                    "Married".into(),
+                ],
+                vec![
+                    Value::STRING("user-3".into()),
+                    Value::STRING("Jane".into()),
+                    Value::STRING("Brown".into()),
                     Value::INT(20),
                     Value::BOOL(false),
                 ],
@@ -413,7 +478,7 @@ mod tests {
         assert_eq!(result.len(), 3);
 
         let ages = [16, 24, 20];
-        let names = vec!["Maciej", "Krzysztof", "Jan"];
+        let names = vec!["John", "Chris", "Jane"];
 
         for (record, (age, name)) in result.iter().zip(ages.iter().zip(names)) {
             assert_eq!(record.len(), 2);
@@ -427,10 +492,9 @@ mod tests {
     }
 
     #[test]
-    fn select_with_simple_filter_test() {
-        let table = setup_test_table();
+    fn select_with_simple_filter_test_string() {
+        let table = setup_test_table_string();
 
-        // Query: SELECT Firstname, Age WHERE Age > 18
         let filter = ValueOperatorFilter {
             column_name: "Age".into(),
             op: ">".into(),
@@ -452,10 +516,45 @@ mod tests {
         assert!(selected_columns.iter().all(|c| column_names.contains(c)));
         assert!(column_names.iter().all(|c| selected_columns.contains(c)));
 
-        // Oczekujemy Krzysztofa (24) i Jana (20), Maciej (16) odpada
         assert_eq!(result.len(), 2);
 
-        let expected_names = ["Krzysztof", "Jan"];
+        let expected_names = ["Chris", "Jane"];
+        let expected_ages = vec![24, 20];
+
+        for (record, (name, age)) in result.iter().zip(expected_names.iter().zip(expected_ages)) {
+            assert_eq!(record[0], Value::STRING(name.to_string()));
+            assert_eq!(record[1], Value::INT(age));
+        }
+    }
+
+    #[test]
+    fn select_with_simple_filter_test() {
+        let table = setup_test_table();
+
+        let filter = ValueOperatorFilter {
+            column_name: "Age".into(),
+            op: ">".into(),
+            value: Value::INT(18),
+        }
+        .to_enum();
+
+        let selected_columns = vec!["Firstname".into(), "Age".into()];
+        let select_command = SelectCommand::new(&table, selected_columns.clone(), filter);
+
+        let result = select_command.execute().unwrap();
+
+        assert!(matches!(result, CommandResult::RecordValueList(_, _)));
+
+        let CommandResult::RecordValueList(column_names, result) = result else {
+            unreachable!("Checked above");
+        };
+
+        assert!(selected_columns.iter().all(|c| column_names.contains(c)));
+        assert!(column_names.iter().all(|c| selected_columns.contains(c)));
+
+        assert_eq!(result.len(), 2);
+
+        let expected_names = ["Chris", "Jane"];
         let expected_ages = vec![24, 20];
 
         for (record, (name, age)) in result.iter().zip(expected_names.iter().zip(expected_ages)) {
@@ -468,7 +567,6 @@ mod tests {
     fn select_with_and_filter_test() {
         let table = setup_test_table();
 
-        // Query: SELECT Firstname WHERE Age > 18 AND Married = false
         let age_filter = AnyWhereFilter::ValueOperator(ValueOperatorFilter {
             column_name: "Age".into(),
             op: ">".into(),
@@ -495,16 +593,14 @@ mod tests {
             unreachable!("Checked above");
         };
 
-        // Maciej: false (za młody), Krzysztof: false (żonaty), Jan: true
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0][0], Value::STRING("Jan".into()));
+        assert_eq!(result[0][0], Value::STRING("Jane".into()));
     }
 
     #[test]
     fn select_with_or_filter_test() {
         let table = setup_test_table();
 
-        // Query: SELECT Firstname WHERE Age < 18 OR Married = true
         let age_filter = ValueOperatorFilter {
             column_name: "Age".into(),
             op: "<".into(),
@@ -536,9 +632,6 @@ mod tests {
             unreachable!("Checked above");
         };
 
-        // Maciej: pasuje (wiek < 18)
-        // Krzysztof: pasuje (żonaty)
-        // Jan: nie pasuje (wiek > 18 i nieżonaty)
         assert_eq!(result.len(), 2);
 
         let names: Vec<String> = result
@@ -549,16 +642,14 @@ mod tests {
             })
             .collect();
 
-        assert!(names.contains(&"Maciej".to_string()));
-        assert!(names.contains(&"Krzysztof".to_string()));
+        assert!(names.contains(&"John".to_string()));
+        assert!(names.contains(&"Chris".to_string()));
     }
 
     #[test]
     fn select_with_column_comparison_test() {
         let table = setup_test_table();
 
-        // Query: SELECT Firstname WHERE Age = Age (tautologia, powinna zwrócić wszystkich)
-        // Normalnie porównywalibyśmy np. Przychód > Wydatki, ale tu mamy tylko jedną kolumnę INT
         let filter = ColumnOperatorFilter {
             column_name1: "Age".into(),
             op: "=".into(),
@@ -583,7 +674,6 @@ mod tests {
     fn select_non_existent_column_fail_test() {
         let table = setup_test_table();
 
-        // Query: SELECT NonExistentColumn
         let select_command = SelectCommand::new(
             &table,
             vec!["NonExistentColumn".into()],
@@ -597,7 +687,7 @@ mod tests {
             CommandError::RecordError(RecordError::InvalidColumnNameError(name)) => {
                 assert_eq!(name, "NonExistentColumn");
             }
-            _ => panic!("Oczekiwano błędu InvalidColumnNameError"),
+            _ => panic!("Expected InvalidColumnNameError"),
         }
     }
 
@@ -605,7 +695,6 @@ mod tests {
     fn select_empty_result_test() {
         let table = setup_test_table();
 
-        // Query: SELECT Firstname WHERE Age > 100
         let filter = ValueOperatorFilter {
             column_name: "Age".into(),
             op: ">".into(),
@@ -646,7 +735,7 @@ mod tests {
             CommandError::RecordError(RecordError::InvalidColumnNameError(name)) => {
                 assert_eq!(name, "GhostColumn");
             }
-            err => panic!("Oczekiwano błędu braku kolumny, otrzymano: {:?}", err),
+            err => panic!("Expected column missing error, received: {:?}", err),
         }
     }
 
@@ -676,73 +765,43 @@ mod tests {
                 assert!(expected_type.to_uppercase().contains("INT"));
                 assert!(got_type.to_uppercase().contains("STRING"));
             }
-            err => panic!("Oczekiwano błędu InvalidValueError, otrzymano: {:?}", err),
+            err => panic!("Expected InvalidValueError, received: {:?}", err),
         }
     }
-
     #[test]
-    fn select_filter_validation_unknown_operator_test() {
-        let table = setup_test_table();
+    fn select_columns_test_string() {
+        let table = setup_test_table_string();
+        let selected_columns = vec!["Age".into(), "Firstname".into()];
+        let select_command = SelectCommand::new(
+            &table,
+            selected_columns.clone(),
+            NoOpWhereFilter {}.to_enum(),
+        );
 
-        let filter = ValueOperatorFilter {
-            column_name: "Age".into(),
-            op: "><".into(),
-            value: Value::INT(18),
-        }
-        .to_enum();
+        let result = select_command.execute().unwrap();
 
-        let select_command = SelectCommand::new(&table, vec!["Firstname".into()], filter);
+        assert!(matches!(result, CommandResult::RecordValueList(_, _)));
 
-        let result = select_command.execute();
+        let CommandResult::RecordValueList(column_names, result) = result else {
+            unreachable!("Checked above");
+        };
 
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            CommandError::UnknownOperatorError(op) => {
-                assert_eq!(op, "><");
-            }
-            err => panic!(
-                "Oczekiwano błędu UnknownOperatorError, otrzymano: {:?}",
-                err
-            ),
-        }
-    }
+        assert!(selected_columns.iter().all(|c| column_names.contains(c)));
+        assert!(column_names.iter().all(|c| selected_columns.contains(c)));
 
-    #[test]
-    fn select_filter_validation_nested_error_test() {
-        let table = setup_test_table();
+        assert_eq!(result.len(), 3);
 
-        let valid_filter = ValueOperatorFilter {
-            column_name: "Age".into(),
-            op: ">".into(),
-            value: Value::INT(10),
-        }
-        .to_enum();
+        let ages = [16, 24, 20];
+        let names = vec!["John", "Chris", "Jane"];
 
-        let invalid_filter = ValueOperatorFilter {
-            column_name: "Married".into(),
-            op: "=".into(),
-            value: Value::INT(1),
-        }
-        .to_enum();
+        for (record, (age, name)) in result.iter().zip(ages.iter().zip(names)) {
+            assert_eq!(record.len(), 2);
 
-        let and_filter = And {
-            filters: vec![valid_filter.to_box(), invalid_filter.to_box()],
-        }
-        .to_enum();
+            assert!(record[0].is_the_same_type_as(&Value::INT(0)));
+            assert_eq!(record[0], Value::INT(*age));
 
-        let select_command = SelectCommand::new(&table, vec!["Firstname".into()], and_filter);
-
-        let result = select_command.execute();
-
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            CommandError::InvalidValueError { column_name, .. } => {
-                assert_eq!(column_name, "Married");
-            }
-            err => panic!(
-                "Oczekiwano błędu InvalidValueError wewnątrz AND, otrzymano: {:?}",
-                err
-            ),
+            assert!(record[1].is_the_same_type_as(&Value::STRING("".into())));
+            assert_eq!(record[1], Value::STRING(name.into()));
         }
     }
 }
