@@ -10,10 +10,6 @@ The project is organized into a hierarchy of directories and files, which facili
 
 - **Cargo.toml**: Cargo configuration file, containing project metadata and a list of external dependencies, such as `clap` (for command-line argument handling), `pest` and `pest_derive` (for grammar parsing), `pest_ascii_tree` (for parser debugging), and `thiserror` (for error handling). It also specifies the Rust edition (2024) and the package name ("rustabase").
 
-- **clippy.toml**: Configuration file for Clippy, a tool for static code analysis to find potential issues and violations of Rust best practices.
-
-- **test.txt**, **test3.txt**, **testqueries.txt**, **text2.txt**: Test files containing sample input data, SQL queries, and test results. They serve to verify the functionality of the parser and commands during development.
-
 ### `src/` Directory
 
 Main source directory containing the application code.
@@ -69,9 +65,9 @@ Rustabase supports the following operations:
 - **SAVE_AS**: Saving command history to a file.
 - **READ_FROM**: Loading and executing commands from a file.
 
-### ColumnOperatorFilter: Column Comparison in WHERE Clause
+### Custom feature ColumnOperatorFilter: Column Comparison in WHERE Clause
 
-One of the advanced features not described in standard SQL commands is `ColumnOperatorFilter`, which enables dynamic data filtering by comparing the value of one column with the value of another column in the same table. This is particularly useful in business scenarios where we want to filter records based on relationships between columns, for example, to check if an employee's age is greater than the minimum age required for a position, or if revenues exceed costs.
+The additional custom feature is `ColumnOperatorFilter`, which enables dynamic data filtering by comparing the value of one column with the value of another column in the same table. 
 
 #### How It Works
 
@@ -91,8 +87,6 @@ SELECT Name FROM Employees WHERE Age > MinAge;
 In this example, the first `SELECT` query will return only the employee with `EmployeeId=1`, because 25 > 21, while for the second, 19 > 21 is false.
 
 In the actual Rust implementation, `ColumnOperatorFilter` delegates the comparison to `ValueOperatorFilter`, retrieving the value from the second column for each record and performing the comparison with the first column. This ensures consistency with other filters and data type handling.
-
-This feature extends filtering capabilities, enabling more complex data analyses without the need for preliminary processing or adding additional computed columns.
 
 ## Favourite module
 
