@@ -16,16 +16,16 @@ impl<'a, K: DatabaseKey> From<SaveAsCommand<'a>> for AnyCommand<'a, K> {
     }
 }
 
-impl<'a> Command for SaveAsCommand<'a> {
+impl Command for SaveAsCommand<'_> {
     fn execute(self) -> Result<CommandResult, CommandError> {
         let mut file = match File::create(&self.file_name) {
             Ok(file) => file,
             Err(e) => return Err(CommandError::IoError(e.to_string())),
         };
 
-        for line in self.lines.iter() {
-            match write!(file, "{line}\n") {
-                Ok(_) => (),
+        for line in self.lines {
+            match writeln!(file, "{line}") {
+                Ok(()) => (),
                 Err(e) => return Err(CommandError::IoError(e.to_string())),
             }
         }

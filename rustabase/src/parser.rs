@@ -78,12 +78,12 @@ impl CommandParser {
 
         for pair in pairs {
             match pair.as_rule() {
-                Rule::create_command => return self.parse_create(pair, db),
-                Rule::insert_command => return self.parse_insert(pair, db),
-                Rule::select_query => return self.parse_select(pair, db),
-                Rule::delete_command => return self.parse_delete(pair, db),
-                Rule::save_as_command => return self.parse_save_as(pair),
-                Rule::read_from_command => return self.parse_read_from(pair),
+                Rule::create_command => return self.parse_create(&pair, db),
+                Rule::insert_command => return self.parse_insert(&pair, db),
+                Rule::select_query => return self.parse_select(&pair, db),
+                Rule::delete_command => return self.parse_delete(&pair, db),
+                Rule::save_as_command => return self.parse_save_as(&pair),
+                Rule::read_from_command => return CommandParser::parse_read_from(&pair),
                 _ => (),
             }
         }
@@ -120,12 +120,12 @@ impl CommandParser {
 
     fn parse_create<'a, K: DatabaseKey>(
         &mut self,
-        pair: Pair<'_, Rule>,
+        pair: &Pair<'_, Rule>,
         db: &'a mut Database<K>,
     ) -> Result<AnyCommand<'a, K>, ParserError> {
-        let table_name = Self::extract_table_name(&pair)?;
-        let key_name = Self::extract_key_name(&pair)?;
-        let (fields, types) = Self::parse_field_type_pairs(&pair)?;
+        let table_name = Self::extract_table_name(pair)?;
+        let key_name = Self::extract_key_name(pair)?;
+        let (fields, types) = Self::parse_field_type_pairs(pair)?;
 
         let command_str = pair.as_str().to_string();
 
@@ -185,11 +185,11 @@ impl CommandParser {
 
     fn parse_insert<'a, K: DatabaseKey>(
         &mut self,
-        pair: Pair<'_, Rule>,
+        pair: &Pair<'_, Rule>,
         db: &'a mut Database<K>,
     ) -> Result<AnyCommand<'a, K>, ParserError> {
-        let table_name = Self::extract_table_name(&pair)?;
-        let (fields, values) = Self::parse_field_value_pairs(&pair)?;
+        let table_name = Self::extract_table_name(pair)?;
+        let (fields, values) = Self::parse_field_value_pairs(pair)?;
 
         let table = db.get_table(&table_name)?;
 
@@ -272,12 +272,12 @@ impl CommandParser {
 
     fn parse_select<'a, K: DatabaseKey>(
         &mut self,
-        pair: Pair<'_, Rule>,
+        pair: &Pair<'_, Rule>,
         db: &'a mut Database<K>,
     ) -> Result<AnyCommand<'a, K>, ParserError> {
-        let table_name = Self::extract_table_name(&pair)?;
-        let selected_columns = Self::parse_column_names_from_pair(&pair)?;
-        let where_filter = Self::parse_where_clause(&pair)?;
+        let table_name = Self::extract_table_name(pair)?;
+        let selected_columns = Self::parse_column_names_from_pair(pair)?;
+        let where_filter = Self::parse_where_clause(pair)?;
 
         let table = db.get_table(&table_name)?;
 
@@ -311,9 +311,8 @@ impl CommandParser {
             if token.as_rule() == Rule::where_clause {
                 if let Some(where_token) = token.into_inner().next() {
                     return Self::construct_where_filter(where_token);
-                } else {
-                    return Err(ParserError::MissingTokenError("or_expr".into()));
                 }
+                return Err(ParserError::MissingTokenError("or_expr".into()));
             }
         }
 
@@ -396,9 +395,9 @@ impl CommandParser {
         Ok((column_name, op, value_or_column))
     }
 
-    fn parse_operator_components<'a>(
-        token: Pair<'a, Rule>,
-    ) -> Result<(&'a str, &'a str, OperatorValue<'a>), ParserError> {
+    fn parse_operator_components(
+        token: Pair<'_, Rule>,
+    ) -> Result<(&str, &str, OperatorValue<'_>), ParserError> {
         let mut column_name: Option<&str> = None;
         let mut op: Option<&str> = None;
         let (mut value, mut second_column) = (None, None);
@@ -456,11 +455,11 @@ impl CommandParser {
 
     fn parse_delete<'a, K: DatabaseKey>(
         &mut self,
-        pair: Pair<'_, Rule>,
+        pair: &Pair<'_, Rule>,
         db: &'a mut Database<K>,
     ) -> Result<AnyCommand<'a, K>, ParserError> {
-        let table_name = Self::extract_table_name(&pair)?;
-        let key_value = Self::extract_key_as_value::<K>(&pair)?;
+        let table_name = Self::extract_table_name(pair)?;
+        let key_value = Self::extract_key_as_value::<K>(pair)?;
 
         let table = db.get_table(&table_name)?;
 
@@ -489,9 +488,9 @@ impl CommandParser {
 
     fn parse_save_as<'a, K: DatabaseKey>(
         &'a mut self,
-        pair: Pair<'_, Rule>,
+        pair: &Pair<'_, Rule>,
     ) -> Result<AnyCommand<'a, K>, ParserError> {
-        let file_name = Self::extract_file_name(&pair)?;
+        let file_name = Self::extract_file_name(pair)?;
 
         let result = SaveAsCommand {
             file_name,
@@ -501,11 +500,10 @@ impl CommandParser {
         Ok(result.into())
     }
 
-    fn parse_read_from<K: DatabaseKey>(
-        &self,
-        pair: Pair<'_, Rule>,
-    ) -> Result<AnyCommand<'_, K>, ParserError> {
-        let file_name = Self::extract_file_name(&pair)?;
+    fn parse_read_from<'a, K: DatabaseKey>(
+        pair: &Pair<'_, Rule>,
+    ) -> Result<AnyCommand<'a, K>, ParserError> {
+        let file_name = Self::extract_file_name(pair)?;
 
         let result = ReadFromCommand { file_name };
 

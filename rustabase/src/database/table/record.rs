@@ -107,6 +107,7 @@ impl Record {
 }
 
 impl RecordBuilder {
+    #[must_use]
     pub fn with_column(mut self, column_name: String, column_value: Value) -> RecordBuilder {
         if let Some(val) = self.record.values_map.get(&column_name) {
             self.errors.push(RecordError::ColumnDefinedTwiceError {

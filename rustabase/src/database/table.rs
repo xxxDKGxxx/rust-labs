@@ -227,6 +227,7 @@ impl<K: DatabaseKey> Table<K> {
 }
 
 impl<K: DatabaseKey> TableBuilder<K> {
+    #[must_use]
     pub fn with_column(mut self, column_name: String, column_type: ColumnType) -> Self {
         if let Some(val) = self.table.columns.get(&column_name) {
             self.errors.push(TableError::ColumnDefinedTwiceError {

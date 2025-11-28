@@ -10,4 +10,4 @@ INSERT OrderId=7, OrderName="Smartwatch", OrderStatus="Delivered", OrderCount=2,
 INSERT OrderId=8, OrderName="External SSD", OrderStatus="Preparing for shipment", OrderCount=4, OrderPrice=600.0, OrderCompleted=false INTO Orders
 INSERT OrderId=9, OrderName="Wireless Charger", OrderStatus="Delivered", OrderCount=3, OrderPrice=120.0, OrderCompleted=true INTO Orders
 INSERT OrderId=10, OrderName="Graphics Tablet", OrderStatus="Processing", OrderCount=1, OrderPrice=750.0, OrderCompleted=false INTO Orders
-INSERT OrderId=11, OrderName="Bluetooth Speaker", OrderStatus="Cancelled", OrderCount=1, OrderPrice=300.0, OrderCompleted=false INTO Orders
+INSERT OrderId=11, OrderName="Bluetooth Speaker", OrderStatus="Cancelled", OrderCount=-3, OrderPrice=300.0, OrderCompleted=false INTO Orders

@@ -173,7 +173,7 @@ fn print_record_value_list(columns: &[String], records: Vec<Vec<record::Value>>)
 }
 
 fn get_column_widths(columns: &[String], records: &Vec<Vec<record::Value>>) -> Vec<usize> {
-    let mut widths = columns.iter().map(|c| c.len()).collect::<Vec<usize>>();
+    let mut widths = columns.iter().map(String::len).collect::<Vec<usize>>();
 
     for record in records {
         for (i, val) in record.iter().enumerate() {
