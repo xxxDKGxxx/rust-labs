@@ -190,6 +190,7 @@ pub fn pipeline(n: i32, threads: usize) -> i32 {
 
         (0..threads).for_each(|_| {
             let tx = tx.clone();
+
             s.spawn(move || {
                 for num in 1..=n {
                     if tx.send(num).is_err() {
@@ -203,9 +204,11 @@ pub fn pipeline(n: i32, threads: usize) -> i32 {
 
         let handle = s.spawn(move || {
             let mut sum = 0;
+
             while let Ok(num) = rx.recv() {
                 sum += num;
             }
+
             sum
         });
 
