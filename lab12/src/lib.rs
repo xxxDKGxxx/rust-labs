@@ -3,9 +3,6 @@ macro_rules! string {
     ($arg: expr) => {
         $arg.to_string()
     };
-    ($arg: literal) => {
-        String::from($arg)
-    };
     ($arg: ident) => {
         String::from($arg)
     };
