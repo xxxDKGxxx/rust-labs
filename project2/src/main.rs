@@ -20,6 +20,13 @@ fn log_error(In(result): In<Result<()>>) {
     }
 }
 
+#[derive(States, Debug, Hash, Eq, PartialEq, Clone, Default)]
+pub enum GameState {
+    #[default]
+    Menu,
+    InGame,
+}
+
 fn main() {
     let _app = App::new()
         .add_plugins((
@@ -30,6 +37,7 @@ fn main() {
             UiPlugin {},
             PlayerPlugin {},
         ))
+        .init_state::<GameState>()
         .add_systems(Startup, setup)
         .add_systems(Update, (camera_movement, camera_zoom))
         .add_systems(PostUpdate, constraint_camera_movement)

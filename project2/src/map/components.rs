@@ -32,7 +32,7 @@ impl MapTile {
     }
 }
 
-#[derive(Component, Debug)]
+#[derive(Component, Debug, PartialEq)]
 pub struct GridPosition {
     pub x: u64,
     pub y: u64,
@@ -46,3 +46,6 @@ impl GridPosition {
 
 #[derive(Component)]
 pub struct SelectionCursor {}
+
+#[derive(Component)]
+pub struct Building {}

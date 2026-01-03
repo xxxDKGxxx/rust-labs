@@ -1,6 +1,11 @@
+use anyhow::anyhow;
 use bevy::{
     color::*,
-    ecs::{message::MessageReader, query::Changed, system::*},
+    ecs::{
+        message::MessageReader,
+        query::{Changed, Has, With},
+        system::*,
+    },
     math::Vec2,
     platform::collections::HashSet,
     sprite::Sprite,
@@ -111,13 +116,27 @@ pub fn update_ownership_tiles(
 pub fn money_gathering_system(
     mut msgr: MessageReader<NextTurnMessage>,
     mut countries_resource: ResMut<Countries>,
-    ownership_tiles: Query<&OwnershipTile>,
-) {
+    map_tiles: Query<(&GridPosition, Has<Building>), With<MapTile>>,
+    ownership_tiles: Query<(&OwnershipTile, &GridPosition)>,
+) -> anyhow::Result<()> {
     for _ in msgr.read() {
-        for ownership_tile in ownership_tiles {
+        for (ownership_tile, ownership_tile_grid_pos) in ownership_tiles {
             if let Some(country_id) = ownership_tile.country_id {
                 countries_resource.countries[country_id].money += 1;
+                let map_tile_at_country_pos = map_tiles
+                    .iter()
+                    .find(|(pos, _)| *pos == ownership_tile_grid_pos);
+
+                let (_, has_building) = match map_tile_at_country_pos {
+                    Some(t) => t,
+                    None => return Err(anyhow!("Found ownership tile without Map Tile")),
+                };
+
+                if has_building {
+                    countries_resource.countries[country_id].money += 100;
+                }
             }
         }
     }
+    Ok(())
 }

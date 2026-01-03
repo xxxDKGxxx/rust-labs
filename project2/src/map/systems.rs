@@ -4,7 +4,10 @@ use bevy_egui::EguiContexts;
 use noise::NoiseFn;
 use rand::random;
 
-use crate::map::{components::*, resources::*};
+use crate::{
+    country::resources::{Countries, Country},
+    map::{components::*, messages::BuildBuildingMessage, resources::*},
+};
 
 pub fn setup_map(
     mut commands: Commands,
@@ -105,6 +108,7 @@ pub fn tile_selection_system(
         cursor_visibility,
         tile,
     );
+
     Ok(())
 }
 
@@ -137,6 +141,41 @@ pub fn update_visibility_system(
 
     for mut tile_visibility in map_tile_visibility {
         *tile_visibility = vis;
+    }
+}
+
+pub fn build_building_system(
+    mut msgr: MessageReader<BuildBuildingMessage>,
+    mut commands: Commands,
+    mut countries: ResMut<Countries>,
+    asset_server: Res<AssetServer>,
+    map_settings: Res<MapSettings>,
+) {
+    for msg in msgr.read() {
+        if countries.countries[msg.country_idx].money < map_settings.building_cost {
+            continue;
+        }
+
+        countries.countries[msg.country_idx].money -= map_settings.building_cost;
+
+        commands
+            .entity(msg.tile_entity)
+            .insert(Building {})
+            .with_children(|parent| {
+                let building_texture = asset_server.load("building_texture.png");
+
+                parent.spawn((
+                    Sprite {
+                        image: building_texture,
+                        custom_size: Some(Vec2::new(
+                            map_settings.tile_size as f32,
+                            map_settings.tile_size as f32,
+                        )),
+                        ..Default::default()
+                    },
+                    Transform::from_xyz(0.0, 0.0, 51.0),
+                ));
+            });
     }
 }
 
