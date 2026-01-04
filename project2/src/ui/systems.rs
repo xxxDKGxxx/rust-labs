@@ -4,12 +4,16 @@ use bevy::{
     color::Color,
     ecs::{
         entity::Entity,
+        hierarchy::Children,
         message::{MessageReader, MessageWriter},
         query::*,
         system::*,
     },
+    math::Vec3,
+    sprite::Text2d,
     state::state::NextState,
     text::*,
+    transform::components::Transform,
     ui::{widget::Text, *},
     utils::default,
 };
@@ -23,16 +27,51 @@ use crate::{
     country::{components::OwnershipTile, resources::*},
     map::{
         components::*,
-        messages::BuildBuildingMessage,
+        messages::{BuildBuildingMessage, SpawnArmyMessage},
         resources::{MapSettings, SelectionState},
     },
     player::resources::PlayerData,
     ui::{
-        components::CountryLabel,
+        components::{ArmySizeLabel, CountryLabel},
         messages::{NextTurnMessage, UiGameMessages},
         resources::TurnCounter,
     },
 };
+
+pub fn display_unit_count(
+    mut commands: Commands,
+    army_query: Query<(Entity, &Army, Option<&Children>), Changed<Army>>,
+    mut text_query: Query<&mut Text2d, With<ArmySizeLabel>>,
+) {
+    for (entity, army, children_opt) in army_query.iter() {
+        let mut found_existing = false;
+
+        if let Some(children) = children_opt {
+            for &child in children.iter() {
+                if let Ok(mut text) = text_query.get_mut(child) {
+                    text.0 = army.number_of_units.to_string();
+                    found_existing = true;
+                    break;
+                }
+            }
+        }
+
+        if !found_existing {
+            commands.entity(entity).with_children(|parent| {
+                parent.spawn((
+                    Text2d::new(army.number_of_units.to_string()),
+                    TextFont {
+                        font_size: 20.0,
+                        ..default()
+                    },
+                    TextColor(Color::WHITE),
+                    Transform::from_xyz(0.0, 30.0, 10.0),
+                    ArmySizeLabel {},
+                ));
+            });
+        }
+    }
+}
 
 pub fn setup_ui_label(mut commands: Commands) {
     commands.spawn((
@@ -52,34 +91,41 @@ pub fn setup_ui_label(mut commands: Commands) {
     ));
 }
 
+#[derive(SystemParam)]
+pub struct ControlsUiResources<'w> {
+    selection_state: Res<'w, SelectionState>,
+    countries: Res<'w, Countries>,
+    turn_counter: Res<'w, TurnCounter>,
+    player_data: Res<'w, PlayerData>,
+    map_settings: Res<'w, MapSettings>,
+}
+
 pub fn setup_controls_ui(
     mut contexts: EguiContexts,
     mut msgs: UiGameMessages,
-    select_state: Res<SelectionState>,
     ownership_tiles: Query<(&OwnershipTile, &GridPosition)>,
     map_tiles: Query<(&MapTile, Has<Building>)>,
-    countries: Res<Countries>,
-    turn_counter_resource: Res<TurnCounter>,
-    player_data: Res<PlayerData>,
-    map_settings: Res<MapSettings>,
+    resources: ControlsUiResources,
 ) -> Result<()> {
     let ctx = contexts.ctx_mut()?;
-    let building_cost = map_settings.building_cost;
+    let building_cost = resources.map_settings.building_cost;
 
     Window::new("Managing Centre").show(ctx, |ui| -> Result<()> {
         ui.heading("Game Options");
 
-        if let Some((country, idx)) =
-            get_country_from_selection_state(&select_state, &ownership_tiles, &countries)
-            && let Some((_, selected_tile_entity)) =
-                get_selected_tile_from_selection_state(&select_state)
+        if let Some((country, idx)) = get_country_from_selection_state(
+            &resources.selection_state,
+            &ownership_tiles,
+            &resources.countries,
+        ) && let Some((_, selected_tile_entity)) =
+            get_selected_tile_from_selection_state(&resources.selection_state)
         {
             let money = country.money;
 
             ui.label(format!("Money: {money}"));
 
             let (_, has_building) = map_tiles.get(selected_tile_entity)?;
-            if player_data.country_idx == idx && !has_building {
+            if resources.player_data.country_idx == idx && !has_building {
                 ui.label(format!("Building cost: {building_cost}"));
                 if ui.button("Build").clicked() {
                     msgs.build_building.write(BuildBuildingMessage {
@@ -90,7 +136,7 @@ pub fn setup_controls_ui(
             }
         }
 
-        let turn_number = turn_counter_resource.count;
+        let turn_number = resources.turn_counter.count;
 
         ui.label(format!("Turn number: {turn_number}"));
 
@@ -100,6 +146,36 @@ pub fn setup_controls_ui(
 
         Ok(())
     });
+
+    Ok(())
+}
+
+pub fn setup_army_controls_ui(
+    mut contexts: EguiContexts,
+    mut msgw: MessageWriter<SpawnArmyMessage>,
+    selection_state: Res<SelectionState>,
+    ownership_tiles: Query<(&OwnershipTile, &GridPosition)>,
+    countries: Res<Countries>,
+    player_data: Res<PlayerData>,
+) -> anyhow::Result<()> {
+    let ctx = contexts.ctx_mut()?;
+    if let Some((_, idx)) =
+        get_country_from_selection_state(&selection_state, &ownership_tiles, &countries)
+        && let Some((_, selected_tile_entity)) =
+            get_selected_tile_from_selection_state(&selection_state)
+    {
+        if player_data.country_idx == idx {
+            Window::new("Army Controls").show(ctx, |ui| {
+                if ui.button("Recruit").clicked() {
+                    msgw.write(SpawnArmyMessage {
+                        tile_entity: selected_tile_entity,
+                        country_idx: idx,
+                        amount: 1,
+                    });
+                }
+            });
+        }
+    }
 
     Ok(())
 }

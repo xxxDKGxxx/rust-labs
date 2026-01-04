@@ -6,15 +6,23 @@ pub struct MapSettings {
     pub height: u64,
     pub tile_size: u64,
     pub building_cost: u32,
+    pub unit_cost: u32,
 }
 
 impl MapSettings {
-    pub fn new(width: u64, height: u64, tile_size: u64, building_cost: u32) -> Self {
+    pub fn new(
+        width: u64,
+        height: u64,
+        tile_size: u64,
+        building_cost: u32,
+        unit_cost: u32,
+    ) -> Self {
         Self {
             width,
             height,
             tile_size,
             building_cost,
+            unit_cost,
         }
     }
 }

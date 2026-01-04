@@ -1,12 +1,16 @@
-use anyhow::Result;
-use bevy::{prelude::*, window::PrimaryWindow};
+use anyhow::{Result, anyhow};
+use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 use bevy_egui::EguiContexts;
 use noise::NoiseFn;
 use rand::random;
 
 use crate::{
-    country::resources::{Countries, Country},
-    map::{components::*, messages::BuildBuildingMessage, resources::*},
+    country::{components::OwnershipTile, resources::Countries},
+    map::{
+        components::*,
+        messages::{BuildBuildingMessage, SpawnArmyMessage},
+        resources::*,
+    },
 };
 
 pub fn setup_map(
@@ -58,17 +62,22 @@ pub fn setup_cursor(mut commands: Commands, map_settings: Res<MapSettings>) {
     ));
 }
 
+#[derive(SystemParam)]
+pub struct TileSelectionSystemResources<'w> {
+    button_input: Res<'w, ButtonInput<MouseButton>>,
+    tile_grid: Res<'w, TileMapGrid>,
+    map_settings: Res<'w, MapSettings>,
+}
+
 pub fn tile_selection_system(
     mut egui_contexts: EguiContexts,
     camera_query: Single<(&Camera, &GlobalTransform), With<Camera2d>>,
-    button_input: Res<ButtonInput<MouseButton>>,
-    tile_grid: Res<TileMapGrid>,
     cursor_visibility_query: Single<(&mut Visibility, &mut Transform), With<SelectionCursor>>,
     window: Single<&Window, With<PrimaryWindow>>,
-    map_settings: Res<MapSettings>,
     mut selected_state: ResMut<SelectionState>,
+    read_resources: TileSelectionSystemResources,
 ) -> Result<()> {
-    if !button_input.just_pressed(MouseButton::Left) {
+    if !read_resources.button_input.just_pressed(MouseButton::Left) {
         return Ok(());
     }
 
@@ -84,13 +93,14 @@ pub fn tile_selection_system(
         return Ok(());
     };
 
-    let world_pos = camera_query.viewport_to_world_2d(&camera_global_transform, cursor_pos)?;
+    let world_pos = camera_query.viewport_to_world_2d(camera_global_transform, cursor_pos)?;
 
-    let (offset_x, offset_y, x, y) = calculate_x_y_indicies(&map_settings, world_pos);
+    let (offset_x, offset_y, x, y) =
+        calculate_x_y_indicies(&read_resources.map_settings, world_pos);
 
     let cursor_visibility = cursor_visibility_query.as_mut();
 
-    let Some(tile) = tile_grid.grid.get(&(x, y)) else {
+    let Some(tile) = read_resources.tile_grid.grid.get(&(x, y)) else {
         *cursor_visibility = Visibility::Hidden;
         selected_state.selected_entity = None;
         selected_state.selected_tile = None;
@@ -99,12 +109,10 @@ pub fn tile_selection_system(
 
     update_selection_and_cursor(
         cursor_transform_query.as_mut(),
-        map_settings,
+        read_resources.map_settings,
         selected_state,
-        offset_x,
-        offset_y,
-        x,
-        y,
+        (offset_x, offset_y),
+        (x, y),
         cursor_visibility,
         tile,
     );
@@ -179,6 +187,111 @@ pub fn build_building_system(
     }
 }
 
+pub fn spawn_army_system(
+    mut commands: Commands,
+    mut msgr: MessageReader<SpawnArmyMessage>,
+    mut countries: ResMut<Countries>,
+    mut map_tile_query: Query<(&GridPosition, Option<&mut Army>), With<MapTile>>,
+    ownership_tiles_query: Query<(&OwnershipTile, &GridPosition)>,
+    map_settings: Res<MapSettings>,
+    asset_server: Res<AssetServer>,
+) -> anyhow::Result<()> {
+    for spawn_army_message in msgr.read() {
+        let spawn_army_cost = map_settings.unit_cost * spawn_army_message.amount as u32;
+
+        if countries.countries[spawn_army_message.country_idx].money < spawn_army_cost as u32 {
+            continue;
+        }
+
+        let (map_tile_grid_position, army_option) =
+            map_tile_query.get_mut(spawn_army_message.tile_entity)?;
+
+        if !check_if_spawning_on_owned_land(
+            spawn_army_message.country_idx,
+            map_tile_grid_position,
+            &ownership_tiles_query,
+        ) {
+            return Err(anyhow!("Tried spawning units on foreign land"));
+        }
+
+        spawn_army_unit(
+            &mut commands,
+            spawn_army_message.amount,
+            spawn_army_message.country_idx,
+            &spawn_army_message.tile_entity,
+            &mut army_option.map(|a| a.into_inner()),
+            &asset_server,
+            &map_settings,
+        )?;
+
+        countries.countries[spawn_army_message.country_idx].money -= spawn_army_cost;
+    }
+
+    Ok(())
+}
+// helpers
+
+fn check_if_spawning_on_owned_land(
+    country_idx: usize,
+    position: &GridPosition,
+    ownership_tiles_query: &Query<(&OwnershipTile, &GridPosition)>,
+) -> bool {
+    let ownership_tile = ownership_tiles_query.iter().find(|(tile, pos)| {
+        if let Some(tile_country_id) = tile.country_id {
+            return *pos == position && tile_country_id == country_idx;
+        }
+
+        false
+    });
+
+    ownership_tile.is_some()
+}
+
+fn spawn_army_unit(
+    commands: &mut Commands,
+    number_of_units: u16,
+    country_idx: usize,
+    map_tile_entity: &Entity,
+    army_option: &mut Option<&mut Army>,
+    asset_server: &Res<AssetServer>,
+    map_settings: &Res<MapSettings>,
+) -> anyhow::Result<()> {
+    match army_option {
+        Some(army) => {
+            if army.country_idx != country_idx {
+                return Err(anyhow!(
+                    "Tried spawning units where foreign ones are present"
+                ));
+            }
+
+            army.number_of_units += number_of_units;
+        }
+        None => {
+            commands
+                .entity(*map_tile_entity)
+                .insert(Army {
+                    country_idx,
+                    number_of_units,
+                })
+                .with_children(|parent| {
+                    parent.spawn((
+                        Sprite {
+                            image: asset_server.load("army_texture.png"),
+                            custom_size: Some(Vec2 {
+                                x: map_settings.tile_size as f32,
+                                y: map_settings.tile_size as f32,
+                            }),
+                            ..Default::default()
+                        },
+                        Transform::from_xyz(0.0, 0.0, 5.0),
+                    ));
+                });
+        }
+    }
+
+    Ok(())
+}
+
 fn calculate_x_y_indicies(
     map_settings: &Res<'_, MapSettings>,
     world_pos: Vec2,
@@ -197,10 +310,8 @@ fn update_selection_and_cursor(
     cursor_transform: &mut Transform,
     map_settings: Res<'_, MapSettings>,
     mut selected_state: ResMut<'_, SelectionState>,
-    offset_x: f32,
-    offset_y: f32,
-    x: u64,
-    y: u64,
+    (offset_x, offset_y): (f32, f32),
+    (x, y): (u64, u64),
     cursor_visibility: &mut Visibility,
     tile: &Entity,
 ) {

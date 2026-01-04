@@ -2,7 +2,11 @@ use bevy::prelude::*;
 
 use crate::{
     GameState, log_error,
-    map::{messages::BuildBuildingMessage, resources::*, systems::*},
+    map::{
+        messages::{BuildBuildingMessage, SpawnArmyMessage},
+        resources::*,
+        systems::*,
+    },
 };
 
 pub mod components;
@@ -13,7 +17,7 @@ pub struct MapPlugin {}
 
 impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(MapSettings::new(100, 50, 100, 10000))
+        app.insert_resource(MapSettings::new(100, 50, 100, 10000, 100))
             .init_resource::<TileMapGrid>()
             .init_resource::<SelectionState>()
             .init_resource::<MapVisibilityState>()
@@ -25,9 +29,11 @@ impl Plugin for MapPlugin {
                     update_visibility_system,
                     map_visibility_toggling_system,
                     build_building_system,
+                    spawn_army_system.pipe(log_error),
                 )
                     .run_if(in_state(GameState::InGame)),
             )
-            .add_message::<BuildBuildingMessage>();
+            .add_message::<BuildBuildingMessage>()
+            .add_message::<SpawnArmyMessage>();
     }
 }

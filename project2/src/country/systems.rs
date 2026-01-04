@@ -105,7 +105,7 @@ pub fn update_ownership_tiles(
         match tile.country_id {
             Some(id) => {
                 let country = &countries.countries[id];
-                sprite.color = Color::from(country.color);
+                sprite.color = country.color;
                 sprite.color.set_alpha(1.0);
             }
             None => sprite.color = Color::NONE,

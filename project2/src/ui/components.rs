@@ -4,4 +4,4 @@ use bevy::ecs::component::Component;
 pub struct CountryLabel {}
 
 #[derive(Component)]
-pub struct NextTurnButton {}
+pub struct ArmySizeLabel {}

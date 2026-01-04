@@ -49,3 +49,14 @@ pub struct SelectionCursor {}
 
 #[derive(Component)]
 pub struct Building {}
+
+#[derive(Component)]
+pub struct Army {
+    pub country_idx: usize,
+    pub number_of_units: u16,
+}
+
+pub struct ArmyMovement {
+    target_position: GridPosition,
+    number_of_units_to_move: u16,
+}

@@ -21,8 +21,10 @@ impl Plugin for UiPlugin {
         app.add_systems(OnEnter(GameState::InGame), setup_ui_label)
             .add_systems(
                 EguiPrimaryContextPass,
-                setup_controls_ui
-                    .pipe(log_error)
+                (
+                    setup_controls_ui.pipe(log_error),
+                    setup_army_controls_ui.pipe(log_error),
+                )
                     .run_if(in_state(GameState::InGame)),
             )
             .add_systems(
@@ -37,7 +39,7 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 PostUpdate,
-                display_country_name.run_if(in_state(GameState::InGame)),
+                (display_country_name, display_unit_count).run_if(in_state(GameState::InGame)),
             )
             .add_message::<NextTurnMessage>()
             .init_resource::<TurnCounter>();

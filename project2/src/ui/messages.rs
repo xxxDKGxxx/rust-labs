@@ -1,5 +1,4 @@
 use bevy::ecs::{
-    entity::Entity,
     message::{Message, MessageWriter},
     system::SystemParam,
 };
