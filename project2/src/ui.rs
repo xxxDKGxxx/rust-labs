@@ -1,6 +1,10 @@
 use crate::{
-    GameState, log_error,
-    ui::{messages::NextTurnMessage, resources::TurnCounter, systems::*},
+    GameState, InGameStates, log_error,
+    ui::{
+        messages::NextTurnMessage,
+        resources::{TurnCounter, UiModel},
+        systems::*,
+    },
 };
 use bevy::{
     app::*,
@@ -39,9 +43,14 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 PostUpdate,
-                (display_country_name, display_unit_count).run_if(in_state(GameState::InGame)),
+                (
+                    handle_selection_change_when_moving_army
+                        .run_if(in_state(InGameStates::MovingArmy)),
+                    (display_country_name, display_unit_count).run_if(in_state(GameState::InGame)),
+                ),
             )
             .add_message::<NextTurnMessage>()
-            .init_resource::<TurnCounter>();
+            .init_resource::<TurnCounter>()
+            .init_resource::<UiModel>();
     }
 }

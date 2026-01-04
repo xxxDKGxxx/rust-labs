@@ -181,7 +181,7 @@ pub fn build_building_system(
                         )),
                         ..Default::default()
                     },
-                    Transform::from_xyz(0.0, 0.0, 51.0),
+                    Transform::from_xyz(0.0, 0.0, 4.0),
                 ));
             });
     }
@@ -229,7 +229,58 @@ pub fn spawn_army_system(
 
     Ok(())
 }
+
+pub fn show_movement_range_system(
+    mut commands: Commands,
+    selection: Res<SelectionState>,
+    army_query: Query<&GridPosition, With<Army>>,
+    tiles_query: Query<&GridPosition, With<MapTile>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    map_settings: Res<MapSettings>,
+) {
+    let Some(army_entity) = selection.selected_entity else {
+        return;
+    };
+
+    let Ok(start_pos) = army_query.get(army_entity) else {
+        return;
+    };
+
+    for tile_pos in tiles_query.iter() {
+        if start_pos.distance(tile_pos) <= 2.0 && start_pos != tile_pos {
+            let world_pos = grid_to_world(tile_pos, &map_settings);
+
+            commands.spawn((
+                Mesh2d(meshes.add(Circle::new(10.0))),
+                MeshMaterial2d(materials.add(Color::srgb(0.0, 1.0, 0.0).with_alpha(0.5))),
+                Transform::from_translation(world_pos.with_z(60.0)),
+                HighlightOverlay,
+                GridPosition::new(tile_pos.x, tile_pos.y),
+            ));
+        }
+    }
+}
+
+pub fn hide_movement_range_system(
+    mut commands: Commands,
+    overlay_query: Query<Entity, With<HighlightOverlay>>,
+) {
+    for entity in overlay_query.iter() {
+        commands.entity(entity).despawn();
+    }
+}
+
 // helpers
+
+fn grid_to_world(grid_position: &GridPosition, map_settings: &Res<MapSettings>) -> Vec3 {
+    let half_tile = map_settings.tile_size as f32 / 2.0;
+    let offset_x = -((map_settings.width * map_settings.tile_size) as f32) / 2.0 + half_tile;
+    let offset_y = -((map_settings.height * map_settings.tile_size) as f32) / 2.0 + half_tile;
+    let world_pos_x = (grid_position.x * map_settings.tile_size) as f32 + offset_x;
+    let world_pos_y = (grid_position.y * map_settings.tile_size) as f32 + offset_y;
+    return Vec3::new(world_pos_x, world_pos_y, 0.0);
+}
 
 fn check_if_spawning_on_owned_land(
     country_idx: usize,

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::{
-    GameState, log_error,
+    GameState, InGameStates, log_error,
     map::{
         messages::{BuildBuildingMessage, SpawnArmyMessage},
         resources::*,
@@ -33,6 +33,11 @@ impl Plugin for MapPlugin {
                 )
                     .run_if(in_state(GameState::InGame)),
             )
+            .add_systems(
+                OnEnter(InGameStates::MovingArmy),
+                show_movement_range_system,
+            )
+            .add_systems(OnExit(InGameStates::MovingArmy), hide_movement_range_system)
             .add_message::<BuildBuildingMessage>()
             .add_message::<SpawnArmyMessage>();
     }

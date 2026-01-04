@@ -42,6 +42,10 @@ impl GridPosition {
     pub fn new(x: u64, y: u64) -> Self {
         Self { x, y }
     }
+
+    pub fn distance(&self, other: &Self) -> f32 {
+        return (((self.x - other.x) as f32).powi(2) + ((self.y - other.y) as f32).powi(2)).sqrt();
+    }
 }
 
 #[derive(Component)]
@@ -56,7 +60,11 @@ pub struct Army {
     pub number_of_units: u16,
 }
 
+#[derive(Component)]
 pub struct ArmyMovement {
-    target_position: GridPosition,
-    number_of_units_to_move: u16,
+    pub target_position: GridPosition,
+    pub number_of_units_to_move: u16,
 }
+
+#[derive(Component)]
+pub struct HighlightOverlay;

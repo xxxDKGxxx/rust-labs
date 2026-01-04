@@ -27,6 +27,14 @@ pub enum GameState {
     InGame,
 }
 
+#[derive(SubStates, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[source(GameState = GameState::InGame)]
+pub enum InGameStates {
+    #[default]
+    Idle,
+    MovingArmy,
+}
+
 fn main() {
     let _app = App::new()
         .add_plugins((
@@ -38,6 +46,7 @@ fn main() {
             PlayerPlugin {},
         ))
         .init_state::<GameState>()
+        .add_sub_state::<InGameStates>()
         .add_systems(Startup, setup)
         .add_systems(Update, (camera_movement, camera_zoom))
         .add_systems(PostUpdate, constraint_camera_movement)

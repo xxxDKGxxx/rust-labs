@@ -10,3 +10,16 @@ impl FromWorld for TurnCounter {
         Self { count: 0 }
     }
 }
+
+#[derive(Resource)]
+pub struct UiModel {
+    pub selected_number_of_units: u16,
+}
+
+impl FromWorld for UiModel {
+    fn from_world(_: &mut bevy::ecs::world::World) -> Self {
+        Self {
+            selected_number_of_units: 1,
+        }
+    }
+}
