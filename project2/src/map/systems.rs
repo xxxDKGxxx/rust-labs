@@ -1,3 +1,5 @@
+use std::cmp::min;
+
 use anyhow::{Result, anyhow};
 use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 use bevy_egui::EguiContexts;
@@ -5,6 +7,7 @@ use noise::NoiseFn;
 use rand::random;
 
 use crate::{
+    common::messages::NextTurnMessage,
     country::{components::OwnershipTile, resources::Countries},
     map::{
         components::*,
@@ -23,7 +26,7 @@ pub fn setup_map(
     let offset_y = -((map_settings.height * map_settings.tile_size) as f32) / 2.0 + half_tile;
 
     let perlin = noise::Perlin::new(random());
-    let scale = 0.05f64;
+    let scale = 0.05f32;
 
     for x in 0..map_settings.width {
         for y in 0..map_settings.height {
@@ -197,16 +200,17 @@ pub fn spawn_army_system(
     asset_server: Res<AssetServer>,
 ) -> anyhow::Result<()> {
     for spawn_army_message in msgr.read() {
-        let spawn_army_cost = map_settings.unit_cost * spawn_army_message.amount as u32;
+        let (amount, spawn_army_cost) =
+            clamp_number_of_units_to_country_budget(&countries, &map_settings, spawn_army_message);
 
-        if countries.countries[spawn_army_message.country_idx].money < spawn_army_cost as u32 {
+        if amount < 1 {
             continue;
         }
 
         let (map_tile_grid_position, army_option) =
             map_tile_query.get_mut(spawn_army_message.tile_entity)?;
 
-        if !check_if_spawning_on_owned_land(
+        if !check_if_on_owned_land(
             spawn_army_message.country_idx,
             map_tile_grid_position,
             &ownership_tiles_query,
@@ -216,7 +220,7 @@ pub fn spawn_army_system(
 
         spawn_army_unit(
             &mut commands,
-            spawn_army_message.amount,
+            amount,
             spawn_army_message.country_idx,
             &spawn_army_message.tile_entity,
             &mut army_option.map(|a| a.into_inner()),
@@ -234,7 +238,7 @@ pub fn show_movement_range_system(
     mut commands: Commands,
     selection: Res<SelectionState>,
     army_query: Query<&GridPosition, With<Army>>,
-    tiles_query: Query<&GridPosition, With<MapTile>>,
+    tiles_query: Query<(&GridPosition, &MapTile)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     map_settings: Res<MapSettings>,
@@ -247,13 +251,20 @@ pub fn show_movement_range_system(
         return;
     };
 
-    for tile_pos in tiles_query.iter() {
+    for (tile_pos, map_tile) in tiles_query.iter() {
         if start_pos.distance(tile_pos) <= 2.0 && start_pos != tile_pos {
             let world_pos = grid_to_world(tile_pos, &map_settings);
 
+            let mut color = Color::from(&map_tile.tile_type).to_linear();
+
+            color = color
+                .with_red(1.0 - color.red)
+                .with_green(1.0 - color.green)
+                .with_blue(1.0 - color.blue);
+
             commands.spawn((
                 Mesh2d(meshes.add(Circle::new(10.0))),
-                MeshMaterial2d(materials.add(Color::srgb(0.0, 1.0, 0.0).with_alpha(0.5))),
+                MeshMaterial2d(materials.add(Color::from(color).with_alpha(0.5))),
                 Transform::from_translation(world_pos.with_z(60.0)),
                 HighlightOverlay,
                 GridPosition::new(tile_pos.x, tile_pos.y),
@@ -271,7 +282,134 @@ pub fn hide_movement_range_system(
     }
 }
 
+pub fn move_army_system(
+    mut commands: Commands,
+    mut next_turn_msgr: MessageReader<NextTurnMessage>,
+    mut army_query: Query<Option<&mut Army>>,
+    mut army_movements: ResMut<ArmyMovements>,
+    map_pos_query: Query<(Entity, &GridPosition), With<MapTile>>,
+    army_sprite_query: Query<(Entity, &ChildOf), With<ArmySpriteTag>>,
+    ownership_tiles_query: Query<(&OwnershipTile, &GridPosition)>,
+    asset_server: Res<AssetServer>,
+    map_settings: Res<MapSettings>,
+) -> anyhow::Result<()> {
+    for _ in next_turn_msgr.read() {
+        while let Some(move_army_message) = army_movements.get_movement() {
+            println!("Received move army message: {:?}", move_army_message);
+
+            let Some(army) = army_query.get(move_army_message.moved_army_entity)? else {
+                return Err(anyhow!(
+                    "Did not found an army entity to move that was provided in the message"
+                ));
+            };
+
+            let Some((ownership_tile, _)) = ownership_tiles_query
+                .iter()
+                .find(|(_, pos)| **pos == move_army_message.target_position)
+            else {
+                return Err(anyhow!(
+                    "Ownership tile not found on position {:?}",
+                    move_army_message.target_position
+                ));
+            };
+
+            let Some(target_tile_country_idx) = ownership_tile.country_id else {
+                continue; // cant move on unowned land;
+            };
+
+            if army.country_idx != target_tile_country_idx {
+                continue; // moving only on owned land
+            }
+
+            let Some((target_entity, _)) = map_pos_query
+                .iter()
+                .find(|(_, pos)| **pos == move_army_message.target_position)
+            else {
+                return Err(anyhow!(
+                    "Map tile entity not found on position {:?}",
+                    move_army_message.target_position
+                ));
+            };
+
+            let moved_army_entity = move_army_message.moved_army_entity;
+            let (country_idx, units_taken) = update_source_army_entity(
+                &mut commands,
+                &mut army_query,
+                army_sprite_query,
+                moved_army_entity,
+                move_army_message,
+            )?;
+            let army_presence_on_target_field_option = army_query.get_mut(target_entity)?;
+            let Ok(_) = spawn_army_unit(
+                &mut commands,
+                units_taken,
+                country_idx,
+                &target_entity,
+                &mut army_presence_on_target_field_option.map(|a| a.into_inner()),
+                &asset_server,
+                &map_settings,
+            ) else {
+                // battle - another country's unit present on the tile
+                return Ok(());
+            };
+        }
+    }
+
+    Ok(())
+}
+
 // helpers
+
+fn update_source_army_entity(
+    commands: &mut Commands<'_, '_>,
+    army_query: &mut Query<'_, '_, Option<&mut Army>>,
+    army_sprite_query: Query<'_, '_, (Entity, &ChildOf), With<ArmySpriteTag>>,
+    moved_army_entity: Entity,
+    move_army_message: super::messages::MoveArmyMessage,
+) -> Result<(usize, i32), anyhow::Error> {
+    let (country_idx, units_taken) = {
+        let Some(moved_army) = &mut army_query.get_mut(moved_army_entity)? else {
+            return Err(anyhow!("Source entity does not contain an Army"));
+        };
+
+        if move_army_message.number_of_units_to_move >= moved_army.number_of_units {
+            commands.entity(moved_army_entity).remove::<Army>();
+
+            let Some((army_sprite_entity, _)) = army_sprite_query
+                .iter()
+                .find(|(_, parent)| parent.0 == moved_army_entity)
+            else {
+                return Err(anyhow!("Could not find the sprite of the army component"));
+            };
+
+            commands.entity(army_sprite_entity).despawn();
+        };
+        let units_to_take = min(
+            move_army_message.number_of_units_to_move,
+            moved_army.number_of_units,
+        );
+
+        moved_army.number_of_units -= units_to_take;
+        (moved_army.country_idx, units_to_take)
+    };
+    Ok((country_idx, units_taken))
+}
+
+fn clamp_number_of_units_to_country_budget(
+    countries: &ResMut<'_, Countries>,
+    map_settings: &Res<'_, MapSettings>,
+    spawn_army_message: &SpawnArmyMessage,
+) -> (i32, i32) {
+    let mut amount = spawn_army_message.amount;
+    let mut spawn_army_cost = map_settings.unit_cost * amount;
+    let spawning_country_money = countries.countries[spawn_army_message.country_idx].money;
+
+    if spawning_country_money < spawn_army_cost {
+        amount = spawning_country_money / map_settings.unit_cost;
+        spawn_army_cost = map_settings.unit_cost * amount;
+    }
+    (amount, spawn_army_cost)
+}
 
 fn grid_to_world(grid_position: &GridPosition, map_settings: &Res<MapSettings>) -> Vec3 {
     let half_tile = map_settings.tile_size as f32 / 2.0;
@@ -279,10 +417,10 @@ fn grid_to_world(grid_position: &GridPosition, map_settings: &Res<MapSettings>) 
     let offset_y = -((map_settings.height * map_settings.tile_size) as f32) / 2.0 + half_tile;
     let world_pos_x = (grid_position.x * map_settings.tile_size) as f32 + offset_x;
     let world_pos_y = (grid_position.y * map_settings.tile_size) as f32 + offset_y;
-    return Vec3::new(world_pos_x, world_pos_y, 0.0);
+    Vec3::new(world_pos_x, world_pos_y, 0.0)
 }
 
-fn check_if_spawning_on_owned_land(
+fn check_if_on_owned_land(
     country_idx: usize,
     position: &GridPosition,
     ownership_tiles_query: &Query<(&OwnershipTile, &GridPosition)>,
@@ -300,7 +438,7 @@ fn check_if_spawning_on_owned_land(
 
 fn spawn_army_unit(
     commands: &mut Commands,
-    number_of_units: u16,
+    number_of_units: i32,
     country_idx: usize,
     map_tile_entity: &Entity,
     army_option: &mut Option<&mut Army>,
@@ -335,6 +473,7 @@ fn spawn_army_unit(
                             ..Default::default()
                         },
                         Transform::from_xyz(0.0, 0.0, 5.0),
+                        ArmySpriteTag {},
                     ));
                 });
         }
@@ -346,14 +485,14 @@ fn spawn_army_unit(
 fn calculate_x_y_indicies(
     map_settings: &Res<'_, MapSettings>,
     world_pos: Vec2,
-) -> (f32, f32, u64, u64) {
+) -> (f32, f32, i32, i32) {
     let half_tile = map_settings.tile_size as f32 / 2.0;
 
     let offset_x = -((map_settings.width * map_settings.tile_size) as f32) / 2.0 + half_tile;
     let offset_y = -((map_settings.height * map_settings.tile_size) as f32) / 2.0 + half_tile;
 
-    let x = ((world_pos.x - offset_x) / map_settings.tile_size as f32).round() as u64;
-    let y = ((world_pos.y - offset_y) / map_settings.tile_size as f32).round() as u64;
+    let x = ((world_pos.x - offset_x) / map_settings.tile_size as f32).round() as i32;
+    let y = ((world_pos.y - offset_y) / map_settings.tile_size as f32).round() as i32;
     (offset_x, offset_y, x, y)
 }
 
@@ -362,7 +501,7 @@ fn update_selection_and_cursor(
     map_settings: Res<'_, MapSettings>,
     mut selected_state: ResMut<'_, SelectionState>,
     (offset_x, offset_y): (f32, f32),
-    (x, y): (u64, u64),
+    (x, y): (i32, i32),
     cursor_visibility: &mut Visibility,
     tile: &Entity,
 ) {
@@ -379,8 +518,8 @@ fn update_selection_and_cursor(
 fn spawn_tile(
     commands: &mut Commands<'_, '_>,
     map_settings: &Res<'_, super::resources::MapSettings>,
-    x: u64,
-    y: u64,
+    x: i32,
+    y: i32,
     world_pos_x: f32,
     world_pos_y: f32,
     tile_type: MapTileType,
@@ -405,16 +544,16 @@ fn spawn_tile(
 fn tile_type_from_noise(
     map_settings: &Res<'_, super::resources::MapSettings>,
     perlin: noise::Perlin,
-    scale: f64,
-    x: u64,
-    y: u64,
+    scale: f32,
+    x: i32,
+    y: i32,
 ) -> MapTileType {
     let moisture_noise = perlin.get([
-        (x + map_settings.width) as f64 * scale,
-        (y + map_settings.height) as f64 * scale,
+        ((x + map_settings.width) as f32 * scale) as f64,
+        ((y + map_settings.height) as f32 * scale) as f64,
     ]);
 
-    let elevation_noise = perlin.get([x as f64 * scale, y as f64 * scale]);
+    let elevation_noise = perlin.get([(x as f32 * scale) as f64, (y as f32 * scale) as f64]);
 
     if elevation_noise < -0.1 {
         super::components::MapTileType::Water

@@ -14,9 +14,9 @@ use bevy::{
 use rand::{Rng, rng};
 
 use crate::{
+    common::messages::NextTurnMessage,
     country::{components::OwnershipTile, resources::*},
     map::{components::*, resources::MapSettings},
-    ui::messages::NextTurnMessage,
 };
 
 pub fn setup_countries_system(mut countries: ResMut<Countries>) {
@@ -38,7 +38,7 @@ pub fn setup_ownership_tiles(
     tiles_query: Query<(&MapTile, &GridPosition, &Transform)>,
     map_settings: Res<MapSettings>,
 ) {
-    let mut countries_capitals_set: HashSet<(u64, u64)> = HashSet::new();
+    let mut countries_capitals_set: HashSet<(i32, i32)> = HashSet::new();
 
     let tile_poses_without_water: Vec<_> = tiles_query
         .iter()

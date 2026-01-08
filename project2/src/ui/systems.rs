@@ -1,4 +1,5 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
+use bevy::prelude::*;
 use bevy::{
     app::AppExit,
     color::Color,
@@ -6,15 +7,14 @@ use bevy::{
         change_detection::DetectChanges,
         entity::Entity,
         hierarchy::Children,
+        lifecycle::RemovedComponents,
         message::{MessageReader, MessageWriter},
-        query::*,
         system::*,
     },
     sprite::Text2d,
     state::state::{NextState, State},
-    text::*,
     transform::components::Transform,
-    ui::{widget::Text, *},
+    ui::widget::Text,
     utils::default,
 };
 use bevy_egui::{
@@ -24,19 +24,37 @@ use bevy_egui::{
 
 use crate::{
     GameState, InGameStates,
+    common::messages::NextTurnMessage,
     country::{components::OwnershipTile, resources::*},
     map::{
         components::*,
-        messages::{BuildBuildingMessage, SpawnArmyMessage},
-        resources::{MapSettings, SelectionState},
+        messages::{BuildBuildingMessage, MoveArmyMessage, SpawnArmyMessage},
+        resources::{ArmyMovements, MapSettings, SelectionState},
     },
     player::resources::PlayerData,
     ui::{
         components::{ArmySizeLabel, CountryLabel},
-        messages::{NextTurnMessage, UiGameMessages},
+        messages::UiGameMessages,
         resources::{TurnCounter, UiModel},
     },
 };
+
+pub fn remove_army_label_system(
+    mut commands: Commands,
+    mut removed_army: RemovedComponents<Army>,
+    children_query: Query<&Children>,
+    label_query: Query<Entity, With<ArmySizeLabel>>,
+) {
+    for entity in removed_army.read() {
+        if let Ok(children) = children_query.get(entity) {
+            for child in children.iter() {
+                if label_query.contains(child) {
+                    commands.entity(child).despawn();
+                }
+            }
+        }
+    }
+}
 
 pub fn display_unit_count(
     mut commands: Commands,
@@ -47,7 +65,7 @@ pub fn display_unit_count(
         let mut found_existing = false;
 
         if let Some(children) = children_opt {
-            for &child in children.iter() {
+            for child in children.iter() {
                 if let Ok(mut text) = text_query.get_mut(child) {
                     text.0 = army.number_of_units.to_string();
                     found_existing = true;
@@ -98,21 +116,24 @@ pub struct ControlsUiResources<'w> {
     turn_counter: Res<'w, TurnCounter>,
     player_data: Res<'w, PlayerData>,
     map_settings: Res<'w, MapSettings>,
+    ui_model: ResMut<'w, UiModel>,
+    next_state: ResMut<'w, NextState<InGameStates>>,
+    current_state: Res<'w, State<InGameStates>>,
 }
 
-pub fn setup_controls_ui(
+pub fn setup_ui(
     mut contexts: EguiContexts,
     mut msgs: UiGameMessages,
+    mut resources: ControlsUiResources,
+    msgw: MessageWriter<SpawnArmyMessage>,
     ownership_tiles: Query<(&OwnershipTile, &GridPosition)>,
     map_tiles: Query<(&MapTile, Has<Building>)>,
-    resources: ControlsUiResources,
+    army: Query<&Army, With<MapTile>>,
 ) -> Result<()> {
     let ctx = contexts.ctx_mut()?;
     let building_cost = resources.map_settings.building_cost;
 
     Window::new("Managing Centre").show(ctx, |ui| -> Result<()> {
-        ui.heading("Game Options");
-
         if let Some((country, idx)) = get_country_from_selection_state(
             &resources.selection_state,
             &ownership_tiles,
@@ -120,124 +141,25 @@ pub fn setup_controls_ui(
         ) && let Some((_, selected_tile_entity)) =
             get_selected_tile_from_selection_state(&resources.selection_state)
         {
-            let money = country.money;
-
-            ui.label(format!("Money: {money}"));
+            country_ui(ui, country);
 
             let (_, has_building) = map_tiles.get(selected_tile_entity)?;
+
             if resources.player_data.country_idx == idx && !has_building {
-                ui.label(format!("Building cost: {building_cost}"));
-                if ui.button("Build").clicked() {
-                    msgs.build_building.write(BuildBuildingMessage {
-                        tile_entity: selected_tile_entity,
-                        country_idx: idx,
-                    });
-                }
+                building_ui(&mut msgs, building_cost, ui, idx, selected_tile_entity);
+            }
+
+            if resources.player_data.country_idx == idx {
+                army_ui(&mut resources, msgw, army, ui, idx, selected_tile_entity);
             }
         }
 
-        let turn_number = resources.turn_counter.count;
-
-        ui.label(format!("Turn number: {turn_number}"));
-
-        if ui.button("Next Turn").clicked() {
-            msgs.next_turn.write(NextTurnMessage {});
-        }
+        turn_ui(msgs, resources, ui);
 
         Ok(())
     });
 
     Ok(())
-}
-
-#[derive(SystemParam)]
-pub struct ArmyControlsUiResources<'w> {
-    selection_state: Res<'w, SelectionState>,
-    countries: Res<'w, Countries>,
-    player_data: Res<'w, PlayerData>,
-    map_settings: Res<'w, MapSettings>,
-    current_state: Res<'w, State<InGameStates>>,
-}
-
-pub fn setup_army_controls_ui(
-    mut contexts: EguiContexts,
-    mut next_state: ResMut<NextState<InGameStates>>,
-    msgw: MessageWriter<SpawnArmyMessage>,
-    ownership_tiles: Query<(&OwnershipTile, &GridPosition)>,
-    army_movement: Query<Option<&ArmyMovement>, With<Army>>,
-    resources: ArmyControlsUiResources,
-    ui_model: ResMut<UiModel>,
-) -> anyhow::Result<()> {
-    let ctx = contexts.ctx_mut()?;
-
-    if let Some((contry, idx)) = get_country_from_selection_state(
-        &resources.selection_state,
-        &ownership_tiles,
-        &resources.countries,
-    ) && let Some((_, selected_tile_entity)) =
-        get_selected_tile_from_selection_state(&resources.selection_state)
-    {
-        if resources.player_data.country_idx == idx {
-            display_army_controls_window(
-                msgw,
-                &resources,
-                ui_model,
-                ctx,
-                contry,
-                idx,
-                selected_tile_entity,
-                &mut next_state,
-                &army_movement,
-            );
-        }
-    }
-
-    Ok(())
-}
-
-fn display_army_controls_window(
-    mut msgw: MessageWriter<'_, SpawnArmyMessage>,
-    resources: &ArmyControlsUiResources<'_>,
-    mut ui_model: ResMut<'_, UiModel>,
-    ctx: &mut egui::Context,
-    contry: &Country,
-    idx: usize,
-    selected_tile_entity: Entity,
-    next_state: &mut ResMut<NextState<InGameStates>>,
-    army_movement: &Query<Option<&ArmyMovement>, With<Army>>,
-) {
-    let max_no_of_units_allowed_to_recruit = contry.money / resources.map_settings.unit_cost;
-
-    Window::new("Army Controls").show(ctx, |ui| {
-        ui.add(
-            DragValue::new(&mut ui_model.selected_number_of_units)
-                .range(1..=max_no_of_units_allowed_to_recruit),
-        );
-
-        if ui.button("Recruit").clicked() {
-            msgw.write(SpawnArmyMessage {
-                tile_entity: selected_tile_entity,
-                country_idx: idx,
-                amount: ui_model.selected_number_of_units,
-            });
-        }
-
-        if ui.button("move").clicked() && *resources.current_state != InGameStates::MovingArmy {
-            next_state.set(InGameStates::MovingArmy);
-        }
-
-        if let Some(selected_entity) = resources.selection_state.selected_entity
-            && let Ok(army_movement_option) = army_movement.get(selected_entity)
-            && let Some(army_movement) = army_movement_option
-        {
-            ui.label(format!(
-                "Army moves {} units to: {} {}",
-                army_movement.number_of_units_to_move,
-                army_movement.target_position.x,
-                army_movement.target_position.y
-            ));
-        }
-    });
 }
 
 pub fn display_country_name(
@@ -310,48 +232,116 @@ pub fn main_menu_system(
 }
 
 pub fn handle_selection_change_when_moving_army(
-    mut commands: Commands,
-    highlight_overlay: Query<&GridPosition, With<HighlightOverlay>>,
+    mut army_movements: ResMut<ArmyMovements>,
     mut next_state: ResMut<NextState<InGameStates>>,
+    highlight_overlay: Query<&GridPosition, With<HighlightOverlay>>,
     selection: Res<SelectionState>,
-    mut army_movement_query: Query<Option<&mut ArmyMovement>, With<Army>>,
     ui_model: Res<UiModel>,
-) {
+) -> anyhow::Result<()> {
     if selection.is_changed() {
-        if let Some(selected_entity) = selection.selected_entity
-            && let Some((selected_pos_x, selected_pos_y)) = selection.selected_tile
-        {
+        let Some(army_entity_being_moved) = ui_model.army_entity_being_moved else {
+            return Err(anyhow!("No moving army entity in the ui model"));
+        };
+
+        if let Some((selected_pos_x, selected_pos_y)) = selection.selected_tile {
             let Some(move_position) = highlight_overlay
                 .iter()
                 .find(|pos| pos.x == selected_pos_x && pos.y == selected_pos_y)
             else {
-                next_state.set(InGameStates::Idle);
-                return;
+                return Ok(());
             };
 
-            if let Ok(army_movement_option) = army_movement_query.get_mut(selected_entity)
-                && let Some(mut army_movement) = army_movement_option
-            {
-                army_movement.number_of_units_to_move = ui_model.selected_number_of_units;
-                army_movement.target_position.x = move_position.x;
-                army_movement.target_position.y = move_position.y;
-            } else {
-                commands.entity(selected_entity).insert(ArmyMovement {
-                    target_position: GridPosition::new(move_position.x, move_position.y),
-                    number_of_units_to_move: ui_model.selected_number_of_units,
-                });
-            }
-
+            army_movements.add_movement(MoveArmyMessage {
+                moved_army_entity: army_entity_being_moved,
+                target_position: GridPosition::new(move_position.x, move_position.y),
+                number_of_units_to_move: ui_model.selected_number_of_units,
+            });
             next_state.set(InGameStates::Idle);
         }
     }
+
+    Ok(())
 }
 
 // helpers
 
+fn country_ui(ui: &mut egui::Ui, country: &Country) {
+    ui.heading("Country");
+    ui.label(format!("Name: {}", country.name));
+    ui.label(format!("Money: {}", country.money));
+    ui.separator();
+}
+
+fn turn_ui(mut msgs: UiGameMessages<'_>, resources: ControlsUiResources<'_>, ui: &mut egui::Ui) {
+    ui.heading("Turn information");
+
+    let turn_number = resources.turn_counter.count;
+
+    ui.label(format!("Turn number: {turn_number}"));
+
+    if ui.button("Next Turn").clicked() {
+        msgs.next_turn.write(NextTurnMessage {});
+    }
+
+    ui.separator();
+}
+
+fn army_ui(
+    resources: &mut ControlsUiResources<'_>,
+    mut msgw: MessageWriter<'_, SpawnArmyMessage>,
+    army: Query<'_, '_, &Army, With<MapTile>>,
+    ui: &mut egui::Ui,
+    idx: usize,
+    selected_tile_entity: Entity,
+) {
+    ui.heading("Army");
+    ui.add(DragValue::new(
+        &mut resources.ui_model.selected_number_of_units,
+    ));
+    ui.label(format!("Unit cost: {}", resources.map_settings.unit_cost));
+
+    if ui.button("Recruit").clicked() {
+        msgw.write(SpawnArmyMessage {
+            tile_entity: selected_tile_entity,
+            country_idx: idx,
+            amount: resources.ui_model.selected_number_of_units,
+        });
+    }
+
+    if ui.button("Move").clicked()
+        && *resources.current_state != InGameStates::MovingArmy
+        && army.get(selected_tile_entity).is_ok()
+    {
+        resources.ui_model.army_entity_being_moved = Some(selected_tile_entity);
+        resources.next_state.set(InGameStates::MovingArmy);
+    }
+
+    ui.separator();
+}
+
+fn building_ui(
+    msgs: &mut UiGameMessages<'_>,
+    building_cost: i32,
+    ui: &mut egui::Ui,
+    idx: usize,
+    selected_tile_entity: Entity,
+) {
+    ui.heading("Building");
+    ui.label(format!("Building cost: {building_cost}"));
+
+    if ui.button("Build").clicked() {
+        msgs.build_building.write(BuildBuildingMessage {
+            tile_entity: selected_tile_entity,
+            country_idx: idx,
+        });
+    }
+
+    ui.separator();
+}
+
 fn get_selected_tile_from_selection_state(
     selection_state: &Res<SelectionState>,
-) -> std::option::Option<((u64, u64), Entity)> {
+) -> std::option::Option<((i32, i32), Entity)> {
     if let Some(selected_tile_pos) = selection_state.selected_tile
         && let Some(selected_tile_entity) = selection_state.selected_entity
     {

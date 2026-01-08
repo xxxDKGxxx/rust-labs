@@ -1,21 +1,25 @@
+use std::collections::VecDeque;
+
 use bevy::{platform::collections::HashMap, prelude::*};
+
+use crate::map::messages::MoveArmyMessage;
 
 #[derive(Resource)]
 pub struct MapSettings {
-    pub width: u64,
-    pub height: u64,
-    pub tile_size: u64,
-    pub building_cost: u32,
-    pub unit_cost: u32,
+    pub width: i32,
+    pub height: i32,
+    pub tile_size: i32,
+    pub building_cost: i32,
+    pub unit_cost: i32,
 }
 
 impl MapSettings {
     pub fn new(
-        width: u64,
-        height: u64,
-        tile_size: u64,
-        building_cost: u32,
-        unit_cost: u32,
+        width: i32,
+        height: i32,
+        tile_size: i32,
+        building_cost: i32,
+        unit_cost: i32,
     ) -> Self {
         Self {
             width,
@@ -29,7 +33,7 @@ impl MapSettings {
 
 #[derive(Resource)]
 pub struct TileMapGrid {
-    pub grid: HashMap<(u64, u64), Entity>,
+    pub grid: HashMap<(i32, i32), Entity>,
 }
 
 impl TileMapGrid {
@@ -48,7 +52,7 @@ impl FromWorld for TileMapGrid {
 
 #[derive(Resource)]
 pub struct SelectionState {
-    pub selected_tile: Option<(u64, u64)>,
+    pub selected_tile: Option<(i32, i32)>,
     pub selected_entity: Option<Entity>,
 }
 
@@ -66,4 +70,27 @@ pub enum MapVisibilityState {
     #[default]
     Terrain,
     PoliticalOnly,
+}
+
+#[derive(Resource)]
+pub struct ArmyMovements {
+    queue: VecDeque<MoveArmyMessage>,
+}
+
+impl FromWorld for ArmyMovements {
+    fn from_world(_: &mut World) -> Self {
+        Self {
+            queue: VecDeque::new(),
+        }
+    }
+}
+
+impl ArmyMovements {
+    pub fn add_movement(&mut self, movement: MoveArmyMessage) {
+        self.queue.push_back(movement);
+    }
+
+    pub fn get_movement(&mut self) -> Option<MoveArmyMessage> {
+        self.queue.pop_front()
+    }
 }

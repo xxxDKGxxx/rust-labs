@@ -1,4 +1,4 @@
-use bevy::ecs::{resource::Resource, world::FromWorld};
+use bevy::ecs::{entity::Entity, resource::Resource, world::FromWorld};
 
 #[derive(Resource)]
 pub struct TurnCounter {
@@ -13,13 +13,15 @@ impl FromWorld for TurnCounter {
 
 #[derive(Resource)]
 pub struct UiModel {
-    pub selected_number_of_units: u16,
+    pub selected_number_of_units: i32,
+    pub army_entity_being_moved: Option<Entity>,
 }
 
 impl FromWorld for UiModel {
     fn from_world(_: &mut bevy::ecs::world::World) -> Self {
         Self {
             selected_number_of_units: 1,
+            army_entity_being_moved: None,
         }
     }
 }

@@ -1,7 +1,8 @@
 use crate::{
-    GameState, InGameStates, log_error,
+    GameState, InGameStates,
+    common::messages::NextTurnMessage,
+    log_error,
     ui::{
-        messages::NextTurnMessage,
         resources::{TurnCounter, UiModel},
         systems::*,
     },
@@ -25,11 +26,7 @@ impl Plugin for UiPlugin {
         app.add_systems(OnEnter(GameState::InGame), setup_ui_label)
             .add_systems(
                 EguiPrimaryContextPass,
-                (
-                    setup_controls_ui.pipe(log_error),
-                    setup_army_controls_ui.pipe(log_error),
-                )
-                    .run_if(in_state(GameState::InGame)),
+                (setup_ui.pipe(log_error),).run_if(in_state(GameState::InGame)),
             )
             .add_systems(
                 EguiPrimaryContextPass,
@@ -45,8 +42,14 @@ impl Plugin for UiPlugin {
                 PostUpdate,
                 (
                     handle_selection_change_when_moving_army
+                        .pipe(log_error)
                         .run_if(in_state(InGameStates::MovingArmy)),
-                    (display_country_name, display_unit_count).run_if(in_state(GameState::InGame)),
+                    (
+                        display_country_name,
+                        display_unit_count,
+                        remove_army_label_system,
+                    )
+                        .run_if(in_state(GameState::InGame)),
                 ),
             )
             .add_message::<NextTurnMessage>()

@@ -7,7 +7,7 @@ use bevy::{
 pub struct Country {
     pub name: String,
     pub color: Color,
-    pub money: u32,
+    pub money: i32,
 }
 
 impl Country {

@@ -9,6 +9,7 @@ use crate::{
     ui::UiPlugin,
 };
 
+mod common;
 mod country;
 mod map;
 mod player;

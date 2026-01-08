@@ -34,17 +34,17 @@ impl MapTile {
 
 #[derive(Component, Debug, PartialEq)]
 pub struct GridPosition {
-    pub x: u64,
-    pub y: u64,
+    pub x: i32,
+    pub y: i32,
 }
 
 impl GridPosition {
-    pub fn new(x: u64, y: u64) -> Self {
+    pub fn new(x: i32, y: i32) -> Self {
         Self { x, y }
     }
 
     pub fn distance(&self, other: &Self) -> f32 {
-        return (((self.x - other.x) as f32).powi(2) + ((self.y - other.y) as f32).powi(2)).sqrt();
+        (((self.x - other.x) as f32).powi(2) + ((self.y - other.y) as f32).powi(2)).sqrt()
     }
 }
 
@@ -57,14 +57,11 @@ pub struct Building {}
 #[derive(Component)]
 pub struct Army {
     pub country_idx: usize,
-    pub number_of_units: u16,
+    pub number_of_units: i32,
 }
 
 #[derive(Component)]
-pub struct ArmyMovement {
-    pub target_position: GridPosition,
-    pub number_of_units_to_move: u16,
-}
+pub struct ArmySpriteTag {}
 
 #[derive(Component)]
 pub struct HighlightOverlay;

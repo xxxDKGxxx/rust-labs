@@ -21,6 +21,7 @@ impl Plugin for MapPlugin {
             .init_resource::<TileMapGrid>()
             .init_resource::<SelectionState>()
             .init_resource::<MapVisibilityState>()
+            .init_resource::<ArmyMovements>()
             .add_systems(OnEnter(GameState::InGame), (setup_map, setup_cursor))
             .add_systems(
                 Update,
@@ -38,6 +39,7 @@ impl Plugin for MapPlugin {
                 show_movement_range_system,
             )
             .add_systems(OnExit(InGameStates::MovingArmy), hide_movement_range_system)
+            .add_systems(PostUpdate, move_army_system.pipe(log_error))
             .add_message::<BuildBuildingMessage>()
             .add_message::<SpawnArmyMessage>();
     }
