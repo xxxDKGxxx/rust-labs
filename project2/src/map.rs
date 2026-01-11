@@ -31,12 +31,13 @@ impl Plugin for MapPlugin {
                     map_visibility_toggling_system,
                     build_building_system,
                     spawn_army_system.pipe(log_error),
+                    army_ownership_claim_system.pipe(log_error),
                 )
                     .run_if(in_state(GameState::InGame)),
             )
             .add_systems(
                 OnEnter(InGameStates::MovingArmy),
-                show_movement_range_system,
+                show_movement_range_system.pipe(log_error),
             )
             .add_systems(OnExit(InGameStates::MovingArmy), hide_movement_range_system)
             .add_systems(PostUpdate, move_army_system.pipe(log_error))

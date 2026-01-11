@@ -1,9 +1,11 @@
 use anyhow::anyhow;
 use bevy::{
+    asset::AssetServer,
     color::*,
     ecs::{
+        entity::Entity,
         message::MessageReader,
-        query::{Changed, Has, With},
+        query::{Changed, Has, With, Without},
         system::*,
     },
     math::Vec2,
@@ -15,14 +17,18 @@ use rand::{Rng, rng};
 
 use crate::{
     common::messages::NextTurnMessage,
-    country::{components::OwnershipTile, resources::*},
+    country::{
+        components::{CountryFlag, OwnershipTile},
+        messages::ChangeRelationMessage,
+        resources::*,
+    },
     map::{components::*, resources::MapSettings},
 };
 
 pub fn setup_countries_system(mut countries: ResMut<Countries>) {
     let countries = countries.as_mut();
 
-    const COUNTRY_NUM: u8 = 3;
+    const COUNTRY_NUM: u8 = 5;
 
     for i in 0..COUNTRY_NUM {
         countries.countries.push(Country::new(
@@ -139,4 +145,73 @@ pub fn money_gathering_system(
         }
     }
     Ok(())
+}
+
+pub fn relation_managing_system(
+    mut change_relation_message_reader: MessageReader<ChangeRelationMessage>,
+    mut diplomacy_resource: ResMut<Diplomacy>,
+) {
+    for change_relation_message in change_relation_message_reader.read() {
+        diplomacy_resource.set_relation(
+            change_relation_message.country_a_idx,
+            change_relation_message.country_b_idx,
+            change_relation_message.relation,
+        );
+    }
+}
+
+pub fn setup_country_flags_system(
+    mut commands: Commands,
+    countries_resource: Res<Countries>,
+    asset_server: Res<AssetServer>,
+    map_settings: Res<MapSettings>,
+) {
+    for idx in 0..countries_resource.countries.len() {
+        commands.spawn((
+            Sprite {
+                image: asset_server.load(format!("countries/{idx}.png")),
+                custom_size: Some(Vec2::new(
+                    (map_settings.tile_size * 3) as f32,
+                    (map_settings.tile_size * 2) as f32,
+                )),
+                color: Color::WHITE.with_alpha(0.5),
+                ..Default::default()
+            },
+            CountryFlag { idx },
+        ));
+    }
+}
+
+pub fn update_country_flag_system(
+    mut commands: Commands,
+    changed_ownership_tiles_query: Query<Entity, Changed<OwnershipTile>>,
+    ownership_tiles_query: Query<(&OwnershipTile, &Transform)>,
+    country_flags: Query<(Entity, &CountryFlag, &mut Transform), Without<OwnershipTile>>,
+) {
+    if changed_ownership_tiles_query.is_empty() {
+        return;
+    }
+
+    for (entity, country_flag, mut transform) in country_flags {
+        let owned_tiles = ownership_tiles_query
+            .iter()
+            .filter(|(o, _)| o.country_id == Some(country_flag.idx))
+            .collect::<Vec<_>>();
+
+        if owned_tiles.is_empty() {
+            println!("Despawning");
+            commands.entity(entity).despawn();
+            continue;
+        }
+
+        let (x_sum, y_sum) = owned_tiles
+            .iter()
+            .fold((0.0, 0.0), |(x, y), (_, transform)| {
+                (x + transform.translation.x, y + transform.translation.y)
+            });
+
+        transform.translation.x = x_sum / owned_tiles.len() as f32;
+        transform.translation.y = y_sum / owned_tiles.len() as f32;
+        transform.translation.z = 51.0;
+    }
 }

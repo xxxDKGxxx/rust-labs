@@ -10,3 +10,8 @@ impl OwnershipTile {
         Self { country_id }
     }
 }
+
+#[derive(Component)]
+pub struct CountryFlag {
+    pub idx: usize,
+}

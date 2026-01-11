@@ -32,7 +32,7 @@ impl MapTile {
     }
 }
 
-#[derive(Component, Debug, PartialEq)]
+#[derive(Component, Debug, PartialEq, Clone)]
 pub struct GridPosition {
     pub x: i32,
     pub y: i32,

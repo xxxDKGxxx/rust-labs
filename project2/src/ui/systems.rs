@@ -22,6 +22,7 @@ use bevy_egui::{
     egui::{self, DragValue, Window},
 };
 
+use crate::country::messages::ChangeRelationMessage;
 use crate::{
     GameState, InGameStates,
     common::messages::NextTurnMessage,
@@ -114,18 +115,18 @@ pub struct ControlsUiResources<'w> {
     selection_state: Res<'w, SelectionState>,
     countries: Res<'w, Countries>,
     turn_counter: Res<'w, TurnCounter>,
-    player_data: Res<'w, PlayerData>,
+    player_data: ResMut<'w, PlayerData>,
     map_settings: Res<'w, MapSettings>,
+    current_state: Res<'w, State<InGameStates>>,
+    diplomacy: Res<'w, Diplomacy>,
     ui_model: ResMut<'w, UiModel>,
     next_state: ResMut<'w, NextState<InGameStates>>,
-    current_state: Res<'w, State<InGameStates>>,
 }
 
 pub fn setup_ui(
     mut contexts: EguiContexts,
     mut msgs: UiGameMessages,
     mut resources: ControlsUiResources,
-    msgw: MessageWriter<SpawnArmyMessage>,
     ownership_tiles: Query<(&OwnershipTile, &GridPosition)>,
     map_tiles: Query<(&MapTile, Has<Building>)>,
     army: Query<&Army, With<MapTile>>,
@@ -145,16 +146,53 @@ pub fn setup_ui(
 
             let (_, has_building) = map_tiles.get(selected_tile_entity)?;
 
-            if resources.player_data.country_idx == idx && !has_building {
-                building_ui(&mut msgs, building_cost, ui, idx, selected_tile_entity);
-            }
-
             if resources.player_data.country_idx == idx {
-                army_ui(&mut resources, msgw, army, ui, idx, selected_tile_entity);
+                if !has_building {
+                    building_ui(&mut msgs, building_cost, ui, idx, selected_tile_entity);
+                }
+
+                army_ui(
+                    &mut resources,
+                    &mut msgs.spawn_army,
+                    army,
+                    ui,
+                    idx,
+                    selected_tile_entity,
+                );
+            } else {
+                ui.heading("Diplomacy");
+
+                let relation = resources
+                    .diplomacy
+                    .get_relation(resources.player_data.country_idx, idx);
+
+                ui.label(format!("Relation: {}", relation));
+
+                if let RelationStatus::AtWar = relation {
+                    if ui.button("Peace").clicked() {
+                        msgs.change_relation.write(ChangeRelationMessage {
+                            country_a_idx: resources.player_data.country_idx,
+                            country_b_idx: idx,
+                            relation: RelationStatus::Neutral,
+                        });
+                    }
+                }
+
+                if let RelationStatus::Neutral = relation {
+                    if ui.button("Declare war").clicked() {
+                        msgs.change_relation.write(ChangeRelationMessage {
+                            country_a_idx: resources.player_data.country_idx,
+                            country_b_idx: idx,
+                            relation: RelationStatus::AtWar,
+                        });
+                    }
+                }
+
+                ui.separator();
             }
         }
 
-        turn_ui(msgs, resources, ui);
+        turn_ui(&mut msgs, &mut resources, ui);
 
         Ok(())
     });
@@ -237,7 +275,13 @@ pub fn handle_selection_change_when_moving_army(
     highlight_overlay: Query<&GridPosition, With<HighlightOverlay>>,
     selection: Res<SelectionState>,
     ui_model: Res<UiModel>,
+    button_input: Res<ButtonInput<KeyCode>>,
 ) -> anyhow::Result<()> {
+    if button_input.just_pressed(KeyCode::Escape) {
+        next_state.set(InGameStates::Idle);
+        return Ok(());
+    }
+
     if selection.is_changed() {
         let Some(army_entity_being_moved) = ui_model.army_entity_being_moved else {
             return Err(anyhow!("No moving army entity in the ui model"));
@@ -272,7 +316,11 @@ fn country_ui(ui: &mut egui::Ui, country: &Country) {
     ui.separator();
 }
 
-fn turn_ui(mut msgs: UiGameMessages<'_>, resources: ControlsUiResources<'_>, ui: &mut egui::Ui) {
+fn turn_ui(
+    msgs: &mut UiGameMessages<'_>,
+    resources: &mut ControlsUiResources<'_>,
+    ui: &mut egui::Ui,
+) {
     ui.heading("Turn information");
 
     let turn_number = resources.turn_counter.count;
@@ -280,7 +328,12 @@ fn turn_ui(mut msgs: UiGameMessages<'_>, resources: ControlsUiResources<'_>, ui:
     ui.label(format!("Turn number: {turn_number}"));
 
     if ui.button("Next Turn").clicked() {
-        msgs.next_turn.write(NextTurnMessage {});
+        if resources.player_data.country_idx == resources.countries.countries.len() - 1 {
+            resources.player_data.country_idx = 0;
+            msgs.next_turn.write(NextTurnMessage {});
+        } else {
+            resources.player_data.country_idx += 1;
+        }
     }
 
     ui.separator();
@@ -288,7 +341,7 @@ fn turn_ui(mut msgs: UiGameMessages<'_>, resources: ControlsUiResources<'_>, ui:
 
 fn army_ui(
     resources: &mut ControlsUiResources<'_>,
-    mut msgw: MessageWriter<'_, SpawnArmyMessage>,
+    msgw: &mut MessageWriter<'_, SpawnArmyMessage>,
     army: Query<'_, '_, &Army, With<MapTile>>,
     ui: &mut egui::Ui,
     idx: usize,

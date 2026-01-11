@@ -1,17 +1,24 @@
 use std::cmp::min;
 
 use anyhow::{Result, anyhow};
-use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
+use bevy::{
+    ecs::system::{IntoResult, SystemParam},
+    prelude::*,
+    window::PrimaryWindow,
+};
 use bevy_egui::EguiContexts;
 use noise::NoiseFn;
 use rand::random;
 
 use crate::{
     common::messages::NextTurnMessage,
-    country::{components::OwnershipTile, resources::Countries},
+    country::{
+        components::OwnershipTile,
+        resources::{Countries, Diplomacy, RelationStatus},
+    },
     map::{
         components::*,
-        messages::{BuildBuildingMessage, SpawnArmyMessage},
+        messages::{BuildBuildingMessage, MoveArmyMessage, SpawnArmyMessage},
         resources::*,
     },
 };
@@ -234,27 +241,46 @@ pub fn spawn_army_system(
     Ok(())
 }
 
+#[derive(SystemParam)]
+pub struct ShowMovementRangeSystemResources<'w> {
+    meshes: ResMut<'w, Assets<Mesh>>,
+    materials: ResMut<'w, Assets<ColorMaterial>>,
+    selection: Res<'w, SelectionState>,
+    map_settings: Res<'w, MapSettings>,
+    diplomacy: Res<'w, Diplomacy>,
+}
+
 pub fn show_movement_range_system(
     mut commands: Commands,
-    selection: Res<SelectionState>,
+    mut resources: ShowMovementRangeSystemResources,
     army_query: Query<&GridPosition, With<Army>>,
     tiles_query: Query<(&GridPosition, &MapTile)>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    map_settings: Res<MapSettings>,
-) {
-    let Some(army_entity) = selection.selected_entity else {
-        return;
+    army_option_query: Query<Option<&mut Army>>,
+    ownership_tiles_query: Query<(&OwnershipTile, &GridPosition)>,
+) -> anyhow::Result<()> {
+    let Some(army_entity) = resources.selection.selected_entity else {
+        return Ok(());
     };
 
     let Ok(start_pos) = army_query.get(army_entity) else {
-        return;
+        return Ok(());
     };
 
     for (tile_pos, map_tile) in tiles_query.iter() {
-        if start_pos.distance(tile_pos) <= 2.0 && start_pos != tile_pos {
-            let world_pos = grid_to_world(tile_pos, &map_settings);
-
+        if start_pos.distance(tile_pos) <= 2.0
+            && start_pos != tile_pos
+            && validate_army_movement(
+                &army_option_query,
+                &MoveArmyMessage {
+                    moved_army_entity: army_entity,
+                    target_position: (*tile_pos).clone(),
+                    number_of_units_to_move: 0,
+                },
+                &ownership_tiles_query,
+                &resources.diplomacy,
+            )?
+        {
+            let world_pos = grid_to_world(tile_pos, &resources.map_settings);
             let mut color = Color::from(&map_tile.tile_type).to_linear();
 
             color = color
@@ -263,14 +289,16 @@ pub fn show_movement_range_system(
                 .with_blue(1.0 - color.blue);
 
             commands.spawn((
-                Mesh2d(meshes.add(Circle::new(10.0))),
-                MeshMaterial2d(materials.add(Color::from(color).with_alpha(0.5))),
+                Mesh2d(resources.meshes.add(Circle::new(10.0))),
+                MeshMaterial2d(resources.materials.add(Color::from(color).with_alpha(0.5))),
                 Transform::from_translation(world_pos.with_z(60.0)),
                 HighlightOverlay,
                 GridPosition::new(tile_pos.x, tile_pos.y),
             ));
         }
     }
+
+    Ok(())
 }
 
 pub fn hide_movement_range_system(
@@ -282,46 +310,36 @@ pub fn hide_movement_range_system(
     }
 }
 
+#[derive(SystemParam)]
+pub struct MoveArmySystemQueries<'w, 's> {
+    army_query: Query<'w, 's, Option<&'static mut Army>>,
+    map_pos_query: Query<'w, 's, (Entity, &'static GridPosition), With<MapTile>>,
+    army_sprite_query: Query<'w, 's, (Entity, &'static ChildOf), With<ArmySpriteTag>>,
+    ownership_tiles_query: Query<'w, 's, (&'static OwnershipTile, &'static GridPosition)>,
+}
+
 pub fn move_army_system(
     mut commands: Commands,
     mut next_turn_msgr: MessageReader<NextTurnMessage>,
-    mut army_query: Query<Option<&mut Army>>,
     mut army_movements: ResMut<ArmyMovements>,
-    map_pos_query: Query<(Entity, &GridPosition), With<MapTile>>,
-    army_sprite_query: Query<(Entity, &ChildOf), With<ArmySpriteTag>>,
-    ownership_tiles_query: Query<(&OwnershipTile, &GridPosition)>,
+    mut queries: MoveArmySystemQueries,
     asset_server: Res<AssetServer>,
     map_settings: Res<MapSettings>,
+    diplomacy_resource: Res<Diplomacy>,
 ) -> anyhow::Result<()> {
     for _ in next_turn_msgr.read() {
         while let Some(move_army_message) = army_movements.get_movement() {
-            println!("Received move army message: {:?}", move_army_message);
-
-            let Some(army) = army_query.get(move_army_message.moved_army_entity)? else {
-                return Err(anyhow!(
-                    "Did not found an army entity to move that was provided in the message"
-                ));
-            };
-
-            let Some((ownership_tile, _)) = ownership_tiles_query
-                .iter()
-                .find(|(_, pos)| **pos == move_army_message.target_position)
-            else {
-                return Err(anyhow!(
-                    "Ownership tile not found on position {:?}",
-                    move_army_message.target_position
-                ));
-            };
-
-            let Some(target_tile_country_idx) = ownership_tile.country_id else {
-                continue; // cant move on unowned land;
-            };
-
-            if army.country_idx != target_tile_country_idx {
-                continue; // moving only on owned land
+            if !validate_army_movement(
+                &queries.army_query,
+                &move_army_message,
+                &queries.ownership_tiles_query,
+                &diplomacy_resource,
+            )? {
+                continue;
             }
 
-            let Some((target_entity, _)) = map_pos_query
+            let Some((target_entity, _)) = queries
+                .map_pos_query
                 .iter()
                 .find(|(_, pos)| **pos == move_army_message.target_position)
             else {
@@ -334,12 +352,12 @@ pub fn move_army_system(
             let moved_army_entity = move_army_message.moved_army_entity;
             let (country_idx, units_taken) = update_source_army_entity(
                 &mut commands,
-                &mut army_query,
-                army_sprite_query,
+                &mut queries.army_query,
+                queries.army_sprite_query,
                 moved_army_entity,
                 move_army_message,
             )?;
-            let army_presence_on_target_field_option = army_query.get_mut(target_entity)?;
+            let army_presence_on_target_field_option = queries.army_query.get_mut(target_entity)?;
             let Ok(_) = spawn_army_unit(
                 &mut commands,
                 units_taken,
@@ -358,7 +376,65 @@ pub fn move_army_system(
     Ok(())
 }
 
+pub fn army_ownership_claim_system(
+    mut ownership_tiles_query: Query<(&mut OwnershipTile, &GridPosition)>,
+    army_query: Query<(&Army, &GridPosition)>,
+) -> anyhow::Result<()> {
+    for (army, position) in army_query.iter() {
+        let (mut ownership_tile, _) = ownership_tiles_query
+            .iter_mut()
+            .find(|(_, pos)| *pos == position)
+            .ok_or(anyhow!("Map tile without ownership tile found"))?;
+
+        if let Some(country_idx) = ownership_tile.country_id
+            && country_idx != army.country_idx
+        {
+            ownership_tile.country_id = Some(army.country_idx);
+        }
+    }
+
+    Ok(())
+}
+
 // helpers
+
+fn validate_army_movement(
+    army_query: &Query<Option<&mut Army>>,
+    move_army_message: &MoveArmyMessage,
+    ownership_tiles_query: &Query<(&OwnershipTile, &GridPosition)>,
+    diplomacy_resource: &Res<Diplomacy>,
+) -> anyhow::Result<bool> {
+    let Some(army) = army_query.get(move_army_message.moved_army_entity)? else {
+        return Err(anyhow!(
+            "Did not found an army entity to move that was provided in the message"
+        ));
+    };
+
+    let Some((ownership_tile, _)) = ownership_tiles_query
+        .iter()
+        .find(|(_, pos)| **pos == move_army_message.target_position)
+    else {
+        return Err(anyhow!(
+            "Ownership tile not found on position {:?}",
+            move_army_message.target_position
+        ));
+    };
+
+    let Some(target_tile_country_idx) = ownership_tile.country_id else {
+        return Ok(false); // cant move on unowned land
+    };
+
+    if army.country_idx != target_tile_country_idx
+        && !matches!(
+            diplomacy_resource.get_relation(army.country_idx, target_tile_country_idx),
+            RelationStatus::AtWar
+        )
+    {
+        return Ok(false); // moving only on own land while not at war
+    }
+
+    Ok(true)
+}
 
 fn update_source_army_entity(
     commands: &mut Commands<'_, '_>,

@@ -97,20 +97,27 @@ fn camera_zoom(
 
 fn constraint_camera_movement(
     mut transform_query: Single<&mut Transform, With<Camera2d>>,
-    projection_query: Single<&Projection, With<Camera2d>>,
+    mut projection_query: Single<&mut Projection, With<Camera2d>>,
     window_query: Single<&Window, With<PrimaryWindow>>,
     map_settings: Res<MapSettings>,
 ) {
+    let window = window_query.into_inner();
     let map_width = map_settings.width * map_settings.tile_size;
     let map_height = map_settings.height * map_settings.tile_size;
 
-    let scale = if let Projection::Orthographic(o) = projection_query.into_inner() {
+    let scale = if let Projection::Orthographic(o) = projection_query.as_mut() {
+        let max_scale_x = map_width as f32 / window.width();
+        let max_scale_y = map_height as f32 / window.height();
+
+        let max_scale = max_scale_x.min(max_scale_y);
+
+        o.scale = max_scale.min(o.scale);
+
         o.scale
     } else {
         1.0
     };
 
-    let window = window_query.into_inner();
     let visible_height = window.height() * scale;
     let visible_width = window.width() * scale;
 
