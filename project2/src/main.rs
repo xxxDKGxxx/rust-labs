@@ -25,6 +25,7 @@ fn log_error(In(result): In<Result<()>>) {
 pub enum GameState {
     #[default]
     Menu,
+    CountrySelection,
     InGame,
 }
 

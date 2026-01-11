@@ -54,7 +54,7 @@ pub struct SelectionCursor {}
 #[derive(Component)]
 pub struct Building {}
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct Army {
     pub country_idx: usize,
     pub number_of_units: i32,

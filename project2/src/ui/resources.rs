@@ -1,4 +1,11 @@
 use bevy::ecs::{entity::Entity, resource::Resource, world::FromWorld};
+use bevy::prelude::Handle;
+use bevy::image::Image;
+
+#[derive(Resource, Default)]
+pub struct MenuIcons {
+    pub country_flags: Vec<Handle<Image>>,
+}
 
 #[derive(Resource)]
 pub struct TurnCounter {

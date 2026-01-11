@@ -36,7 +36,7 @@ use crate::{
     ui::{
         components::{ArmySizeLabel, CountryLabel},
         messages::UiGameMessages,
-        resources::{TurnCounter, UiModel},
+        resources::{MenuIcons, TurnCounter, UiModel},
     },
 };
 
@@ -45,8 +45,13 @@ pub fn remove_army_label_system(
     mut removed_army: RemovedComponents<Army>,
     children_query: Query<&Children>,
     label_query: Query<Entity, With<ArmySizeLabel>>,
+    army_query: Query<&Army>,
 ) {
     for entity in removed_army.read() {
+        if army_query.contains(entity) {
+            continue;
+        }
+
         if let Ok(children) = children_query.get(entity) {
             for child in children.iter() {
                 if label_query.contains(child) {
@@ -238,7 +243,7 @@ pub fn main_menu_system(
 ) -> anyhow::Result<()> {
     let ctx = contexts.ctx_mut()?;
 
-    egui::Window::new("Menu Główne")
+    egui::Window::new("Main Menu")
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -247,21 +252,21 @@ pub fn main_menu_system(
             ui.add_space(10.0);
 
             if ui
-                .add(egui::Button::new("Rozpocznij Grę").min_size([100.0, 30.0].into()))
+                .add(egui::Button::new("Start Game").min_size([100.0, 30.0].into()))
                 .clicked()
             {
-                next_state.set(GameState::InGame);
+                next_state.set(GameState::CountrySelection);
             }
 
             ui.add_space(5.0);
 
-            if ui.button("Opcje").clicked() {
+            if ui.button("Options").clicked() {
                 println!("Tu byłyby opcje...");
             }
 
             ui.add_space(5.0);
 
-            if ui.button("Wyjdź").clicked() {
+            if ui.button("Quit").clicked() {
                 exit.write(AppExit::Success);
             }
         });
@@ -404,6 +409,54 @@ fn get_selected_tile_from_selection_state(
     None
 }
 
+pub fn load_menu_icons(mut menu_icons: ResMut<MenuIcons>, asset_server: Res<AssetServer>) {
+    for i in 0..5 {
+        let path = format!("countries/{}.png", i);
+        let handle = asset_server.load(path);
+        menu_icons.country_flags.push(handle);
+    }
+}
+
+pub fn country_selection_system(
+    mut contexts: EguiContexts,
+    mut next_state: ResMut<NextState<GameState>>,
+    mut player_data: ResMut<PlayerData>,
+    menu_icons: Res<MenuIcons>,
+) -> anyhow::Result<()> {
+    let texture_ids: Vec<_> = menu_icons
+        .country_flags
+        .iter()
+        .map(|icon| contexts.add_image(bevy_egui::EguiTextureHandle::Strong(icon.clone())))
+        .collect();
+
+    let ctx = contexts.ctx_mut()?;
+
+    egui::Window::new("Select Country")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.heading("Choose your country");
+            ui.add_space(10.0);
+
+            ui.horizontal(|ui| {
+                for (i, texture_id) in texture_ids.into_iter().enumerate() {
+                    if ui
+                        .add(egui::Button::image_and_text(
+                            egui::load::SizedTexture::new(texture_id, [50.0, 50.0]),
+                            "",
+                        ))
+                        .clicked()
+                    {
+                        player_data.country_idx = i;
+                        next_state.set(GameState::InGame);
+                    }
+                }
+            });
+        });
+
+    Ok(())
+}
 fn get_country_from_selection_state<'a>(
     select_state: &Res<SelectionState>,
     ownership_tiles: &Query<(&OwnershipTile, &GridPosition)>,

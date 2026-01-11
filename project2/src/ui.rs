@@ -24,6 +24,7 @@ pub struct UiPlugin {}
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut bevy::app::App) {
         app.add_systems(OnEnter(GameState::InGame), setup_ui_label)
+            .add_systems(Startup, load_menu_icons)
             .add_systems(
                 EguiPrimaryContextPass,
                 (setup_ui.pipe(log_error),).run_if(in_state(GameState::InGame)),
@@ -33,6 +34,12 @@ impl Plugin for UiPlugin {
                 main_menu_system
                     .pipe(log_error)
                     .run_if(in_state(GameState::Menu)),
+            )
+            .add_systems(
+                EguiPrimaryContextPass,
+                country_selection_system
+                    .pipe(log_error)
+                    .run_if(in_state(GameState::CountrySelection)),
             )
             .add_systems(
                 Update,
@@ -54,6 +61,7 @@ impl Plugin for UiPlugin {
             )
             .add_message::<NextTurnMessage>()
             .init_resource::<TurnCounter>()
-            .init_resource::<UiModel>();
+            .init_resource::<UiModel>()
+            .init_resource::<resources::MenuIcons>();
     }
 }

@@ -329,47 +329,14 @@ pub fn move_army_system(
 ) -> anyhow::Result<()> {
     for _ in next_turn_msgr.read() {
         while let Some(move_army_message) = army_movements.get_movement() {
-            if !validate_army_movement(
-                &queries.army_query,
-                &move_army_message,
-                &queries.ownership_tiles_query,
-                &diplomacy_resource,
-            )? {
-                continue;
-            }
-
-            let Some((target_entity, _)) = queries
-                .map_pos_query
-                .iter()
-                .find(|(_, pos)| **pos == move_army_message.target_position)
-            else {
-                return Err(anyhow!(
-                    "Map tile entity not found on position {:?}",
-                    move_army_message.target_position
-                ));
-            };
-
-            let moved_army_entity = move_army_message.moved_army_entity;
-            let (country_idx, units_taken) = update_source_army_entity(
+            process_army_movement(
                 &mut commands,
-                &mut queries.army_query,
-                queries.army_sprite_query,
-                moved_army_entity,
+                &mut queries,
                 move_army_message,
-            )?;
-            let army_presence_on_target_field_option = queries.army_query.get_mut(target_entity)?;
-            let Ok(_) = spawn_army_unit(
-                &mut commands,
-                units_taken,
-                country_idx,
-                &target_entity,
-                &mut army_presence_on_target_field_option.map(|a| a.into_inner()),
+                &diplomacy_resource,
                 &asset_server,
                 &map_settings,
-            ) else {
-                // battle - another country's unit present on the tile
-                return Ok(());
-            };
+            )?;
         }
     }
 
@@ -397,6 +364,161 @@ pub fn army_ownership_claim_system(
 }
 
 // helpers
+
+fn process_army_movement(
+    commands: &mut Commands,
+    queries: &mut MoveArmySystemQueries,
+    move_army_message: MoveArmyMessage,
+    diplomacy_resource: &Res<Diplomacy>,
+    asset_server: &Res<AssetServer>,
+    map_settings: &Res<MapSettings>,
+) -> anyhow::Result<()> {
+    if !validate_army_movement(
+        &queries.army_query,
+        &move_army_message,
+        &queries.ownership_tiles_query,
+        diplomacy_resource,
+    )? || move_army_message.number_of_units_to_move <= 0
+    {
+        return Ok(());
+    }
+
+    let Some((target_entity, _)) = queries
+        .map_pos_query
+        .iter()
+        .find(|(_, pos)| **pos == move_army_message.target_position)
+    else {
+        return Err(anyhow!(
+            "Map tile entity not found on position {:?}",
+            move_army_message.target_position
+        ));
+    };
+
+    let moved_army_entity = move_army_message.moved_army_entity;
+    let (country_idx, units_taken) = update_source_army_entity(
+        commands,
+        &mut queries.army_query,
+        queries.army_sprite_query.clone(),
+        moved_army_entity,
+        move_army_message,
+    )?;
+
+    handle_army_arrival(
+        commands,
+        queries,
+        target_entity,
+        country_idx,
+        units_taken,
+        asset_server,
+        map_settings,
+    )?;
+
+    Ok(())
+}
+
+fn handle_army_arrival(
+    commands: &mut Commands,
+    queries: &mut MoveArmySystemQueries,
+    target_entity: Entity,
+    country_idx: usize,
+    units_taken: i32,
+    asset_server: &Res<AssetServer>,
+    map_settings: &Res<MapSettings>,
+) -> anyhow::Result<()> {
+    let mut army_presence_on_target_field_option = queries.army_query.get_mut(target_entity)?;
+
+    let is_hostile = if let Some(army) = army_presence_on_target_field_option.as_ref() {
+        army.country_idx != country_idx
+    } else {
+        false
+    };
+
+    if is_hostile {
+        if let Some(target_army) = army_presence_on_target_field_option.as_mut() {
+            army_battle_system(
+                commands,
+                target_entity,
+                target_army,
+                units_taken,
+                country_idx,
+                &queries.army_sprite_query,
+                asset_server,
+                map_settings,
+            );
+        }
+    } else {
+        let _ = spawn_army_unit(
+            commands,
+            units_taken,
+            country_idx,
+            &target_entity,
+            &mut army_presence_on_target_field_option.map(|a| a.into_inner()),
+            asset_server,
+            map_settings,
+        );
+    }
+
+    Ok(())
+}
+
+fn army_battle_system(
+    commands: &mut Commands,
+    target_entity: Entity,
+    target_army: &mut Army,
+    attacker_units: i32,
+    attacker_country_idx: usize,
+    army_sprite_query: &Query<(Entity, &ChildOf), With<ArmySpriteTag>>,
+    asset_server: &Res<AssetServer>,
+    map_settings: &Res<MapSettings>,
+) {
+    let defender_units = target_army.number_of_units;
+
+    if attacker_units > defender_units {
+        // Attacker wins
+        let remaining_attacker_units = attacker_units - defender_units;
+
+        // Remove defender army component
+        commands.entity(target_entity).remove::<Army>();
+
+        // Remove defender sprite
+        if let Some((sprite_entity, _)) = army_sprite_query
+            .iter()
+            .find(|(_, parent)| parent.0 == target_entity)
+        {
+            commands.entity(sprite_entity).despawn();
+        }
+
+        // Spawn attacker army
+        // We use None because we just removed the army component
+        let mut none_opt: Option<&mut Army> = None;
+        let _ = spawn_army_unit(
+            commands,
+            remaining_attacker_units,
+            attacker_country_idx,
+            &target_entity,
+            &mut none_opt,
+            asset_server,
+            map_settings,
+        );
+    } else {
+        // Defender wins or draw
+        let remaining_defender_units = defender_units - attacker_units;
+
+        if remaining_defender_units > 0 {
+            target_army.number_of_units = remaining_defender_units;
+        } else {
+            // Draw - both destroyed
+            commands.entity(target_entity).remove::<Army>();
+
+            if let Some((sprite_entity, _)) = army_sprite_query
+                .iter()
+                .find(|(_, parent)| parent.0 == target_entity)
+            {
+                commands.entity(sprite_entity).despawn();
+            }
+        }
+    }
+}
 
 fn validate_army_movement(
     army_query: &Query<Option<&mut Army>>,

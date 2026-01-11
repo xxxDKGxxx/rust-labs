@@ -73,7 +73,7 @@ impl Diplomacy {
         if c1 < c2 {
             return (c1, c2);
         } else {
-            (c2, c2)
+            (c2, c1)
         }
     }
 
