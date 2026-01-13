@@ -332,13 +332,13 @@ fn turn_ui(
 
     ui.label(format!("Turn number: {turn_number}"));
 
-    if ui.button("Next Turn").clicked() {
-        if resources.player_data.country_idx == resources.countries.countries.len() - 1 {
-            resources.player_data.country_idx = 0;
-            msgs.next_turn.write(NextTurnMessage {});
-        } else {
-            resources.player_data.country_idx += 1;
-        }
+    if ui.button("End Turn").clicked() {
+        // if resources.player_data.country_idx == resources.countries.countries.len() - 1 {
+        msgs.next_turn.write(NextTurnMessage {});
+        // resources.player_data.country_idx = 0;
+        // } else {
+        // resources.player_data.country_idx += 1;
+        // }
     }
 
     ui.separator();

@@ -2,7 +2,8 @@ use std::cmp::min;
 
 use anyhow::{Result, anyhow};
 use bevy::{
-    ecs::system::{IntoResult, SystemParam},
+    ecs::{query::QueryIter, system::SystemParam},
+    platform::collections::HashMap,
     prelude::*,
     window::PrimaryWindow,
 };
@@ -225,15 +226,27 @@ pub fn spawn_army_system(
             return Err(anyhow!("Tried spawning units on foreign land"));
         }
 
-        spawn_army_unit(
-            &mut commands,
-            amount,
-            spawn_army_message.country_idx,
-            &spawn_army_message.tile_entity,
-            &mut army_option.map(|a| a.into_inner()),
-            &asset_server,
-            &map_settings,
-        )?;
+        if let Some(mut army) = army_option {
+            if army.country_idx == spawn_army_message.country_idx {
+                army.number_of_units += amount;
+            } else {
+                return Err(anyhow!(
+                    "Found foreign unit on the field while recruiting an army"
+                ));
+            }
+        } else {
+            spawn_army_unit(
+                &mut commands,
+                Army {
+                    country_idx: spawn_army_message.country_idx,
+                    number_of_units: amount,
+                },
+                &spawn_army_message.tile_entity,
+                &asset_server,
+                &map_settings,
+                &countries,
+            )?;
+        }
 
         countries.countries[spawn_army_message.country_idx].money -= spawn_army_cost;
     }
@@ -255,7 +268,7 @@ pub fn show_movement_range_system(
     mut resources: ShowMovementRangeSystemResources,
     army_query: Query<&GridPosition, With<Army>>,
     tiles_query: Query<(&GridPosition, &MapTile)>,
-    army_option_query: Query<Option<&mut Army>>,
+    army_mut_query: Query<&mut Army>,
     ownership_tiles_query: Query<(&OwnershipTile, &GridPosition)>,
 ) -> anyhow::Result<()> {
     let Some(army_entity) = resources.selection.selected_entity else {
@@ -270,7 +283,7 @@ pub fn show_movement_range_system(
         if start_pos.distance(tile_pos) <= 2.0
             && start_pos != tile_pos
             && validate_army_movement(
-                &army_option_query,
+                &army_mut_query,
                 &MoveArmyMessage {
                     moved_army_entity: army_entity,
                     target_position: (*tile_pos).clone(),
@@ -312,10 +325,69 @@ pub fn hide_movement_range_system(
 
 #[derive(SystemParam)]
 pub struct MoveArmySystemQueries<'w, 's> {
-    army_query: Query<'w, 's, Option<&'static mut Army>>,
+    // army_query: Query<'w, 's, Option<&'static mut Army>>,
+    army_queries: ParamSet<
+        'w,
+        's,
+        (
+            Query<'w, 's, &'static mut Army>,
+            Query<'w, 's, (Entity, &'static Army, &'static GridPosition)>,
+        ),
+    >,
+    // army_mut_query: Query<'w, 's, &'static mut Army>,
+    // army_with_position_query: Query<'w, 's, (Entity, &'static Army, &'static GridPosition)>,
     map_pos_query: Query<'w, 's, (Entity, &'static GridPosition), With<MapTile>>,
     army_sprite_query: Query<'w, 's, (Entity, &'static ChildOf), With<ArmySpriteTag>>,
     ownership_tiles_query: Query<'w, 's, (&'static OwnershipTile, &'static GridPosition)>,
+}
+
+#[derive(Clone)]
+enum ArmyStatusOnField {
+    Removed(Entity),
+    OldPresent(Entity, Army),
+    ToAdd(Entity, Army),
+    Modified(Entity, Army),
+}
+
+impl ArmyStatusOnField {
+    fn modify(self, army: Army) -> anyhow::Result<Self> {
+        match self {
+            ArmyStatusOnField::Removed(_) => {
+                Err(anyhow!("Tried modifying field with removed army"))
+            }
+            ArmyStatusOnField::OldPresent(entity, _) => Ok(Self::Modified(entity, army)),
+            ArmyStatusOnField::ToAdd(entity, _) => Ok(Self::ToAdd(entity, army)),
+            ArmyStatusOnField::Modified(entity, _) => Ok(Self::Modified(entity, army)),
+        }
+    }
+
+    fn insert_new(self, army: Army) -> anyhow::Result<Self> {
+        if let ArmyStatusOnField::Removed(entity) = self {
+            return Ok(Self::ToAdd(entity, army));
+        }
+
+        Err(anyhow!(
+            "Tried inserting on a field that already contained an army"
+        ))
+    }
+
+    fn remove(self) -> Self {
+        match self {
+            ArmyStatusOnField::Removed(_) => self,
+            ArmyStatusOnField::OldPresent(entity, _) => Self::Removed(entity),
+            ArmyStatusOnField::ToAdd(entity, _) => Self::Removed(entity),
+            ArmyStatusOnField::Modified(entity, _) => Self::Removed(entity),
+        }
+    }
+
+    fn get_army(&self) -> Option<Army> {
+        match self {
+            ArmyStatusOnField::Removed(_) => None,
+            ArmyStatusOnField::OldPresent(_, army) => Some(army.clone()),
+            ArmyStatusOnField::ToAdd(_, army) => Some(army.clone()),
+            ArmyStatusOnField::Modified(_, army) => Some(army.clone()),
+        }
+    }
 }
 
 pub fn move_army_system(
@@ -326,7 +398,16 @@ pub fn move_army_system(
     asset_server: Res<AssetServer>,
     map_settings: Res<MapSettings>,
     diplomacy_resource: Res<Diplomacy>,
+    countries_resource: Res<Countries>,
 ) -> anyhow::Result<()> {
+    if next_turn_msgr.is_empty() {
+        return Ok(());
+    }
+
+    let army_placements_iter = queries.army_queries.p1().into_iter();
+
+    let mut army_status_position_hash_map = army_position_states_to_hash_map(army_placements_iter);
+
     for _ in next_turn_msgr.read() {
         while let Some(move_army_message) = army_movements.get_movement() {
             process_army_movement(
@@ -336,9 +417,21 @@ pub fn move_army_system(
                 &diplomacy_resource,
                 &asset_server,
                 &map_settings,
+                &countries_resource,
+                &mut army_status_position_hash_map,
             )?;
         }
     }
+
+    modify_armies_from_hashmap(
+        &mut commands,
+        &mut army_status_position_hash_map,
+        &queries.army_sprite_query,
+        &mut queries.army_queries.p0(),
+        &asset_server,
+        &map_settings,
+        &countries_resource,
+    )?;
 
     Ok(())
 }
@@ -365,16 +458,72 @@ pub fn army_ownership_claim_system(
 
 // helpers
 
+fn army_position_states_to_hash_map(
+    army_positions_query_iter: QueryIter<(Entity, &Army, &GridPosition), ()>,
+) -> HashMap<GridPosition, ArmyStatusOnField> {
+    let mut result = HashMap::new();
+
+    for (entity, army, position) in army_positions_query_iter {
+        result.insert(
+            *position,
+            ArmyStatusOnField::OldPresent(entity, army.clone()),
+        );
+    }
+
+    result
+}
+
+fn modify_armies_from_hashmap(
+    commands: &mut Commands,
+    army_status_on_field_map: &mut HashMap<GridPosition, ArmyStatusOnField>,
+    army_sprite_query: &Query<(Entity, &ChildOf), With<ArmySpriteTag>>,
+    army_query: &mut Query<&mut Army>,
+    asset_server: &Res<AssetServer>,
+    map_settings: &Res<MapSettings>,
+    countries: &Res<Countries>,
+) -> anyhow::Result<()> {
+    for (_, army_status) in army_status_on_field_map.iter() {
+        match army_status {
+            ArmyStatusOnField::Removed(entity) => {
+                commands.entity(*entity).remove::<Army>();
+                if let Some((sprite_entity, _)) = army_sprite_query
+                    .iter()
+                    .find(|(_, parent)| parent.0 == *entity)
+                {
+                    commands.entity(sprite_entity).despawn();
+                }
+            }
+            ArmyStatusOnField::OldPresent(_, _) => (),
+            ArmyStatusOnField::ToAdd(entity, army) => spawn_army_unit(
+                commands,
+                army.clone(),
+                entity,
+                asset_server,
+                map_settings,
+                countries,
+            )?,
+            ArmyStatusOnField::Modified(entity, army) => {
+                let mut target_army = army_query.get_mut(*entity)?;
+                target_army.country_idx = army.country_idx;
+                target_army.number_of_units = army.number_of_units;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn process_army_movement(
     commands: &mut Commands,
     queries: &mut MoveArmySystemQueries,
     move_army_message: MoveArmyMessage,
-    diplomacy_resource: &Res<Diplomacy>,
-    asset_server: &Res<AssetServer>,
-    map_settings: &Res<MapSettings>,
+    diplomacy_resource: &Diplomacy,
+    asset_server: &AssetServer,
+    map_settings: &MapSettings,
+    countries: &Countries,
+    army_status_on_field_map: &mut HashMap<GridPosition, ArmyStatusOnField>,
 ) -> anyhow::Result<()> {
     if !validate_army_movement(
-        &queries.army_query,
+        &queries.army_queries.p0(),
         &move_army_message,
         &queries.ownership_tiles_query,
         diplomacy_resource,
@@ -394,23 +543,33 @@ fn process_army_movement(
         ));
     };
 
-    let moved_army_entity = move_army_message.moved_army_entity;
+    // let moved_army_entity = move_army_message.moved_army_entity;
+
+    let army_pos_query = queries.army_queries.p1();
+
+    let (_, _, source_position) = army_pos_query.get(move_army_message.moved_army_entity)?;
+
     let (country_idx, units_taken) = update_source_army_entity(
-        commands,
-        &mut queries.army_query,
-        queries.army_sprite_query.clone(),
-        moved_army_entity,
-        move_army_message,
+        // commands,
+        // &mut queries.army_query,
+        // queries.army_sprite_query.clone(),
+        // moved_army_entity,
+        &move_army_message,
+        *source_position,
+        army_status_on_field_map,
     )?;
 
     handle_army_arrival(
         commands,
         queries,
         target_entity,
+        move_army_message.target_position,
         country_idx,
         units_taken,
         asset_server,
         map_settings,
+        countries,
+        army_status_on_field_map,
     )?;
 
     Ok(())
@@ -420,113 +579,189 @@ fn handle_army_arrival(
     commands: &mut Commands,
     queries: &mut MoveArmySystemQueries,
     target_entity: Entity,
+    target_position: GridPosition,
     country_idx: usize,
     units_taken: i32,
-    asset_server: &Res<AssetServer>,
-    map_settings: &Res<MapSettings>,
+    asset_server: &AssetServer,
+    map_settings: &MapSettings,
+    countries: &Countries,
+    army_status_on_field_map: &mut HashMap<GridPosition, ArmyStatusOnField>,
 ) -> anyhow::Result<()> {
-    let mut army_presence_on_target_field_option = queries.army_query.get_mut(target_entity)?;
+    // let mut army_presence_on_target_field_option = queries.army_query.get_mut(target_entity)?;
 
-    let is_hostile = if let Some(army) = army_presence_on_target_field_option.as_ref() {
-        army.country_idx != country_idx
-    } else {
-        false
+    // let is_hostile = if let Some(army) = army_presence_on_target_field_option.as_ref() {
+    //     army.country_idx != country_idx
+    // } else {
+    //     false
+    // };
+
+    let Some(army_status_on_target_field) = army_status_on_field_map.get(&target_position) else {
+        add_new_army(
+            target_entity,
+            target_position,
+            country_idx,
+            units_taken,
+            army_status_on_field_map,
+        );
+        return Ok(());
     };
 
+    let Some(army_on_target_field) = army_status_on_target_field.get_army() else {
+        add_new_army(
+            target_entity,
+            target_position,
+            country_idx,
+            units_taken,
+            army_status_on_field_map,
+        );
+        return Ok(());
+    };
+
+    let is_hostile = army_on_target_field.country_idx != country_idx;
+
+    println!("Arriving army: {}, is_hostile: {}", country_idx, is_hostile);
+
     if is_hostile {
-        if let Some(target_army) = army_presence_on_target_field_option.as_mut() {
-            army_battle_system(
-                commands,
-                target_entity,
-                target_army,
-                units_taken,
-                country_idx,
-                &queries.army_sprite_query,
-                asset_server,
-                map_settings,
-            );
-        }
-    } else {
-        let _ = spawn_army_unit(
-            commands,
+        army_battle_system(
+            // commands,
+            &army_on_target_field,
+            // target_entity,
+            // target_army,
             units_taken,
             country_idx,
-            &target_entity,
-            &mut army_presence_on_target_field_option.map(|a| a.into_inner()),
-            asset_server,
-            map_settings,
+            target_position,
+            army_status_on_target_field.clone(),
+            army_status_on_field_map, // &queries.army_sprite_query,
+                                      // asset_server,
+                                      // map_settings,
+                                      // countries,
+        )?;
+    } else {
+        army_status_on_field_map.insert(
+            target_position,
+            army_status_on_target_field.clone().modify(Army {
+                country_idx,
+                number_of_units: army_on_target_field.number_of_units + units_taken,
+            })?,
         );
     }
 
     Ok(())
 }
 
-fn army_battle_system(
-    commands: &mut Commands,
+fn add_new_army(
     target_entity: Entity,
-    target_army: &mut Army,
+    target_position: GridPosition,
+    country_idx: usize,
+    units_taken: i32,
+    army_status_on_field_map: &mut HashMap<GridPosition, ArmyStatusOnField>,
+) {
+    if units_taken > 0 {
+        army_status_on_field_map.insert(
+            target_position,
+            ArmyStatusOnField::ToAdd(
+                target_entity,
+                Army {
+                    country_idx,
+                    number_of_units: units_taken,
+                },
+            ),
+        );
+    }
+}
+
+fn army_battle_system(
+    // commands: &mut Commands,
+    // target_entity: Entity,
+    target_army: &Army,
     attacker_units: i32,
     attacker_country_idx: usize,
-    army_sprite_query: &Query<(Entity, &ChildOf), With<ArmySpriteTag>>,
-    asset_server: &Res<AssetServer>,
-    map_settings: &Res<MapSettings>,
-) {
+    // army_sprite_query: &Query<(Entity, &ChildOf), With<ArmySpriteTag>>,
+    // asset_server: &AssetServer,
+    // map_settings: &MapSettings,
+    // countries: &Countries,
+    target_position: GridPosition,
+    mut army_status_on_target_field: ArmyStatusOnField,
+    army_status_on_field_map: &mut HashMap<GridPosition, ArmyStatusOnField>,
+) -> anyhow::Result<()> {
     let defender_units = target_army.number_of_units;
 
     if attacker_units > defender_units {
+        println!("Attacker from {} country wins", attacker_country_idx);
         // Attacker wins
         let remaining_attacker_units = attacker_units - defender_units;
 
         // Remove defender army component
-        commands.entity(target_entity).remove::<Army>();
+        // commands.entity(target_entity).remove::<Army>();
+        army_status_on_target_field = army_status_on_target_field.remove();
 
-        // Remove defender sprite
-        if let Some((sprite_entity, _)) = army_sprite_query
-            .iter()
-            .find(|(_, parent)| parent.0 == target_entity)
-        {
-            commands.entity(sprite_entity).despawn();
-        }
+        // // Remove defender sprite
+        // if let Some((sprite_entity, _)) = army_sprite_query
+        //     .iter()
+        //     .find(|(_, parent)| parent.0 == target_entity)
+        // {
+        //     commands.entity(sprite_entity).despawn();
+        // }
 
         // Spawn attacker army
         // We use None because we just removed the army component
-        let mut none_opt: Option<&mut Army> = None;
-        let _ = spawn_army_unit(
-            commands,
-            remaining_attacker_units,
-            attacker_country_idx,
-            &target_entity,
-            &mut none_opt,
-            asset_server,
-            map_settings,
-        );
+        // let mut none_opt: Option<&mut Army> = None;
+        // let _ = spawn_army_unit(
+        //     commands,
+        //     remaining_attacker_units,
+        //     attacker_country_idx,
+        //     &target_entity,
+        //     &mut none_opt,
+        //     asset_server,
+        //     map_settings,
+        //     countries,
+        // );
+
+        army_status_on_target_field = army_status_on_target_field.insert_new(Army {
+            country_idx: attacker_country_idx,
+            number_of_units: remaining_attacker_units,
+        })?;
+
+        army_status_on_field_map.insert(target_position, army_status_on_target_field);
     } else {
         // Defender wins or draw
         let remaining_defender_units = defender_units - attacker_units;
 
         if remaining_defender_units > 0 {
-            target_army.number_of_units = remaining_defender_units;
+            println!("Defender from {} country wins", target_army.country_idx);
+            army_status_on_target_field.modify(Army {
+                country_idx: target_army.country_idx,
+                number_of_units: remaining_defender_units,
+            })?;
         } else {
             // Draw - both destroyed
-            commands.entity(target_entity).remove::<Army>();
+            println!(
+                "Draw - both {} and {} should be destroyed",
+                attacker_country_idx, target_army.country_idx
+            );
+            // commands.entity(target_entity).remove::<Army>();
 
-            if let Some((sprite_entity, _)) = army_sprite_query
-                .iter()
-                .find(|(_, parent)| parent.0 == target_entity)
-            {
-                commands.entity(sprite_entity).despawn();
-            }
+            // if let Some((sprite_entity, _)) = army_sprite_query
+            //     .iter()
+            //     .find(|(_, parent)| parent.0 == target_entity)
+            // {
+            //     commands.entity(sprite_entity).despawn();
+            // }
+            army_status_on_target_field = army_status_on_target_field.remove();
+            army_status_on_field_map.insert(target_position, army_status_on_target_field);
         }
     }
+
+    Ok(())
 }
 
 fn validate_army_movement(
-    army_query: &Query<Option<&mut Army>>,
+    army_query: &Query<&mut Army>,
     move_army_message: &MoveArmyMessage,
     ownership_tiles_query: &Query<(&OwnershipTile, &GridPosition)>,
-    diplomacy_resource: &Res<Diplomacy>,
+    diplomacy_resource: &Diplomacy,
 ) -> anyhow::Result<bool> {
-    let Some(army) = army_query.get(move_army_message.moved_army_entity)? else {
+    let Ok(army) = army_query.get(move_army_message.moved_army_entity) else {
         return Err(anyhow!(
             "Did not found an army entity to move that was provided in the message"
         ));
@@ -559,38 +794,69 @@ fn validate_army_movement(
 }
 
 fn update_source_army_entity(
-    commands: &mut Commands<'_, '_>,
-    army_query: &mut Query<'_, '_, Option<&mut Army>>,
-    army_sprite_query: Query<'_, '_, (Entity, &ChildOf), With<ArmySpriteTag>>,
-    moved_army_entity: Entity,
-    move_army_message: super::messages::MoveArmyMessage,
+    // commands: &mut Commands<'_, '_>,
+    // army_query: &mut Query<'_, '_, Option<&mut Army>>,
+    // army_sprite_query: Query<'_, '_, (Entity, &ChildOf), With<ArmySpriteTag>>,
+    // moved_army_entity: Entity,
+    move_army_message: &MoveArmyMessage,
+    source_position: GridPosition,
+    army_status_on_field_map: &mut HashMap<GridPosition, ArmyStatusOnField>,
 ) -> Result<(usize, i32), anyhow::Error> {
-    let (country_idx, units_taken) = {
-        let Some(moved_army) = &mut army_query.get_mut(moved_army_entity)? else {
-            return Err(anyhow!("Source entity does not contain an Army"));
-        };
-
-        if move_army_message.number_of_units_to_move >= moved_army.number_of_units {
-            commands.entity(moved_army_entity).remove::<Army>();
-
-            let Some((army_sprite_entity, _)) = army_sprite_query
-                .iter()
-                .find(|(_, parent)| parent.0 == moved_army_entity)
-            else {
-                return Err(anyhow!("Could not find the sprite of the army component"));
-            };
-
-            commands.entity(army_sprite_entity).despawn();
-        };
-        let units_to_take = min(
-            move_army_message.number_of_units_to_move,
-            moved_army.number_of_units,
-        );
-
-        moved_army.number_of_units -= units_to_take;
-        (moved_army.country_idx, units_to_take)
+    let Some(army_status_on_field) = army_status_on_field_map.get(&source_position) else {
+        return Err(anyhow!("Source position does not have an army"));
     };
-    Ok((country_idx, units_taken))
+
+    let Some(mut source_army) = army_status_on_field.get_army() else {
+        return Ok((0, 0));
+    };
+
+    let units_to_take = min(
+        move_army_message.number_of_units_to_move,
+        source_army.number_of_units,
+    );
+
+    let country_idx = source_army.country_idx;
+
+    if units_to_take == source_army.number_of_units {
+        army_status_on_field_map.insert(source_position, army_status_on_field.clone().remove());
+    } else {
+        source_army.number_of_units -= units_to_take;
+        army_status_on_field_map.insert(
+            source_position,
+            army_status_on_field.clone().modify(source_army)?,
+        );
+    }
+
+    Ok((country_idx, units_to_take))
+
+    // let (country_idx, units_taken) = {
+    //     let Some(moved_army) = &mut army_query.get_mut(moved_army_entity)? else {
+    //         return Err(anyhow!("Source entity does not contain an Army"));
+    //     };
+
+    //     if move_army_message.number_of_units_to_move >= moved_army.number_of_units {
+    //         let Some((army_sprite_entity, _)) = army_sprite_query
+    //             .iter()
+    //             .find(|(_, parent)| parent.0 == moved_army_entity)
+    //         else {
+    //             return Err(anyhow!("Could not find the sprite of the army component"));
+    //         };
+
+    //         commands.entity(army_sprite_entity).despawn();
+    //         commands.entity(moved_army_entity).remove::<Army>();
+    //     };
+
+    //     let units_to_take = min(
+    //         move_army_message.number_of_units_to_move,
+    //         moved_army.number_of_units,
+    //     );
+
+    //     moved_army.number_of_units -= units_to_take;
+
+    //     println!("Taken {units_to_take} from source army enttiy");
+
+    //     (moved_army.country_idx, units_to_take)
+    // };
 }
 
 fn clamp_number_of_units_to_country_budget(
@@ -636,46 +902,32 @@ fn check_if_on_owned_land(
 
 fn spawn_army_unit(
     commands: &mut Commands,
-    number_of_units: i32,
-    country_idx: usize,
+    army: Army,
     map_tile_entity: &Entity,
-    army_option: &mut Option<&mut Army>,
-    asset_server: &Res<AssetServer>,
-    map_settings: &Res<MapSettings>,
+    asset_server: &AssetServer,
+    map_settings: &MapSettings,
+    countries: &Countries,
 ) -> anyhow::Result<()> {
-    match army_option {
-        Some(army) => {
-            if army.country_idx != country_idx {
-                return Err(anyhow!(
-                    "Tried spawning units where foreign ones are present"
-                ));
-            }
+    let country_idx = army.country_idx;
 
-            army.number_of_units += number_of_units;
-        }
-        None => {
-            commands
-                .entity(*map_tile_entity)
-                .insert(Army {
-                    country_idx,
-                    number_of_units,
-                })
-                .with_children(|parent| {
-                    parent.spawn((
-                        Sprite {
-                            image: asset_server.load("army_texture.png"),
-                            custom_size: Some(Vec2 {
-                                x: map_settings.tile_size as f32,
-                                y: map_settings.tile_size as f32,
-                            }),
-                            ..Default::default()
-                        },
-                        Transform::from_xyz(0.0, 0.0, 5.0),
-                        ArmySpriteTag {},
-                    ));
-                });
-        }
-    }
+    commands
+        .entity(*map_tile_entity)
+        .insert(army)
+        .with_children(|parent| {
+            parent.spawn((
+                Sprite {
+                    image: asset_server.load("army_texture.png"),
+                    custom_size: Some(Vec2 {
+                        x: map_settings.tile_size as f32,
+                        y: map_settings.tile_size as f32,
+                    }),
+                    color: Color::from(countries.countries[country_idx].color),
+                    ..Default::default()
+                },
+                Transform::from_xyz(0.0, 0.0, 5.0),
+                ArmySpriteTag {},
+            ));
+        });
 
     Ok(())
 }

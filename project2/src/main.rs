@@ -3,12 +3,14 @@ use bevy::{input::mouse::*, prelude::*, window::PrimaryWindow};
 use bevy_egui::{EguiContexts, EguiPlugin};
 
 use crate::{
+    ai::AiPlugin,
     country::CountryPlugin,
     map::{MapPlugin, resources::MapSettings},
     player::PlayerPlugin,
     ui::UiPlugin,
 };
 
+mod ai;
 mod common;
 mod country;
 mod map;
@@ -46,6 +48,7 @@ fn main() {
             CountryPlugin {},
             UiPlugin {},
             PlayerPlugin {},
+            AiPlugin {},
         ))
         .init_state::<GameState>()
         .add_sub_state::<InGameStates>()
