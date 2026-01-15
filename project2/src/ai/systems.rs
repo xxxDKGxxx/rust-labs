@@ -4,23 +4,27 @@ use bevy::{ecs::system::SystemParam, prelude::*};
 use rand::{Rng, rng};
 
 use crate::{
-    common::messages::NextTurnMessage,
+    common::{components::GridPosition, messages::NextTurnMessage},
     country::{
         components::OwnershipTile,
         messages::ChangeRelationMessage,
         resources::{Countries, Country, Diplomacy, RelationStatus},
     },
     map::{
-        components::{Army, Building, GridPosition, MapTile},
+        components::{Army, Building, MapTile},
         messages::{BuildBuildingMessage, MoveArmyMessage, SpawnArmyMessage},
         resources::{ArmyMovements, MapSettings, TileMapGrid},
     },
     player::resources::PlayerData,
 };
 
+#[derive(Message)]
+pub struct AiTurnMessage {}
+
 #[derive(SystemParam)]
 pub struct AiSystemParams<'w, 's> {
-    msgr: MessageReader<'w, 's, NextTurnMessage>,
+    msgr: MessageWriter<'w, NextTurnMessage>,
+    ai_msgr: MessageReader<'w, 's, AiTurnMessage>,
     player_data: Res<'w, PlayerData>,
     countries: Res<'w, Countries>,
     diplomacy: Res<'w, Diplomacy>,
@@ -36,7 +40,7 @@ pub struct AiSystemParams<'w, 's> {
 }
 
 pub fn ai_system(mut params: AiSystemParams) {
-    if params.msgr.read().count() == 0 {
+    if params.ai_msgr.read().count() == 0 {
         return;
     }
 
@@ -78,6 +82,8 @@ pub fn ai_system(mut params: AiSystemParams) {
             &mut params.army_movements,
         );
     }
+
+    params.msgr.write(NextTurnMessage {});
 }
 
 fn build_maps(
@@ -150,7 +156,7 @@ fn process_economy(
         let candidates: Vec<Entity> = positions
             .iter()
             .filter_map(|&(x, y)| tile_grid.grid.get(&(x, y)).copied())
-            .filter(|&e| map_tiles.get(e).map_or(false, |has| !has))
+            .filter(|&e| map_tiles.get(e).is_ok_and(|has| !has))
             .collect();
 
         if !candidates.is_empty() && rng().random_bool(0.5) {
@@ -237,7 +243,7 @@ fn is_valid_move(
     map: &HashMap<(i32, i32), usize>,
     dip: &Diplomacy,
 ) -> bool {
-    map.get(&(nx, ny)).map_or(false, |&owner| {
+    map.get(&(nx, ny)).is_some_and(|&owner| {
         owner == country_idx
             || matches!(dip.get_relation(country_idx, owner), RelationStatus::AtWar)
     })
@@ -251,12 +257,12 @@ fn select_target(
 ) -> GridPosition {
     let enemies: Vec<&GridPosition> = moves
         .iter()
-        .filter(|p| map.get(&(p.x, p.y)).map_or(false, |&o| o != idx))
+        .filter(|p| map.get(&(p.x, p.y)).is_some_and(|&o| o != idx))
         .collect();
 
     if !enemies.is_empty() {
-        enemies[rng.random_range(0..enemies.len())].clone()
+        *enemies[rng.random_range(0..enemies.len())]
     } else {
-        moves[rng.random_range(0..moves.len())].clone()
+        moves[rng.random_range(0..moves.len())]
     }
 }

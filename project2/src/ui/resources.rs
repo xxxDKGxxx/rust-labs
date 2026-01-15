@@ -1,6 +1,6 @@
 use bevy::ecs::{entity::Entity, resource::Resource, world::FromWorld};
-use bevy::prelude::Handle;
 use bevy::image::Image;
+use bevy::prelude::Handle;
 
 #[derive(Resource, Default)]
 pub struct MenuIcons {
@@ -22,6 +22,8 @@ impl FromWorld for TurnCounter {
 pub struct UiModel {
     pub selected_number_of_units: i32,
     pub army_entity_being_moved: Option<Entity>,
+    pub save_popup_open: bool,
+    pub save_file_name: String,
 }
 
 impl FromWorld for UiModel {
@@ -29,6 +31,8 @@ impl FromWorld for UiModel {
         Self {
             selected_number_of_units: 1,
             army_entity_being_moved: None,
+            save_popup_open: false,
+            save_file_name: "".into(),
         }
     }
 }

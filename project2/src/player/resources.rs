@@ -1,6 +1,7 @@
 use bevy::ecs::resource::Resource;
+use serde::{Deserialize, Serialize};
 
-#[derive(Resource)]
+#[derive(Resource, Serialize, Deserialize)]
 pub struct PlayerData {
     pub country_idx: usize,
 }

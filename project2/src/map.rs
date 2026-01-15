@@ -30,8 +30,11 @@ impl Plugin for MapPlugin {
                     update_visibility_system,
                     map_visibility_toggling_system,
                     build_building_system,
-                    spawn_army_system.pipe(log_error),
+                    spawn_army_system
+                        .pipe(log_error)
+                        .before(army_position_sync_system),
                     army_ownership_claim_system.pipe(log_error),
+                    army_position_sync_system,
                 )
                     .run_if(in_state(GameState::InGame)),
             )
@@ -40,7 +43,14 @@ impl Plugin for MapPlugin {
                 show_movement_range_system.pipe(log_error),
             )
             .add_systems(OnExit(InGameStates::MovingArmy), hide_movement_range_system)
-            .add_systems(PostUpdate, move_army_system.pipe(log_error))
+            .add_systems(
+                PostUpdate,
+                (
+                    move_army_system.pipe(log_error),
+                    save_map_system.pipe(log_error),
+                )
+                    .run_if(in_state(GameState::InGame)),
+            )
             .add_message::<BuildBuildingMessage>()
             .add_message::<SpawnArmyMessage>();
     }

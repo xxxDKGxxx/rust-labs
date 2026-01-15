@@ -14,9 +14,14 @@ use bevy::{
     transform::components::Transform,
 };
 use rand::{Rng, rng};
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    common::messages::NextTurnMessage,
+    common::{
+        components::GridPosition,
+        messages::{NextTurnMessage, SaveGameMessage},
+        systems::SAVE_PATH,
+    },
     country::{
         components::{CountryFlag, OwnershipTile},
         messages::ChangeRelationMessage,
@@ -214,4 +219,45 @@ pub fn update_country_flag_system(
         transform.translation.y = y_sum / owned_tiles.len() as f32;
         transform.translation.z = 51.0;
     }
+}
+
+#[derive(Serialize, Deserialize)]
+struct CountriesSaveState {
+    ownership_tiles: Vec<(OwnershipTile, GridPosition)>,
+    countries: Countries,
+    diplomacy: Diplomacy,
+}
+
+const SAVE_FILE_NAME: &str = "save_country.json";
+
+pub fn save_countries_system(
+    mut save_game_message_reader: MessageReader<SaveGameMessage>,
+    ownership_tiles_query: Query<(&OwnershipTile, &GridPosition)>,
+    countries_resource: Res<Countries>,
+    diplomacy_resource: Res<Diplomacy>,
+) -> anyhow::Result<()> {
+    for save_game_message in save_game_message_reader.read() {
+        let mut ownership_tiles_vec: Vec<(OwnershipTile, GridPosition)> = Vec::new();
+        for (ownership_tile, grid_position) in ownership_tiles_query {
+            ownership_tiles_vec.push((*ownership_tile, *grid_position));
+        }
+
+        let state = CountriesSaveState {
+            ownership_tiles: ownership_tiles_vec,
+            countries: (*countries_resource).clone(),
+            diplomacy: (*diplomacy_resource).clone(),
+        };
+
+        let save_json = serde_json::to_string_pretty(&state)?;
+        std::fs::create_dir_all(format!("{}/{}", SAVE_PATH, save_game_message.save_name))?;
+        std::fs::write(
+            format!(
+                "{}/{}/{}",
+                SAVE_PATH, save_game_message.save_name, SAVE_FILE_NAME
+            ),
+            save_json,
+        )?;
+    }
+
+    Ok(())
 }

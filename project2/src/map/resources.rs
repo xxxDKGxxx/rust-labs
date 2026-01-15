@@ -1,10 +1,11 @@
 use std::collections::VecDeque;
 
 use bevy::{platform::collections::HashMap, prelude::*};
+use serde::{Deserialize, Serialize};
 
 use crate::map::messages::MoveArmyMessage;
 
-#[derive(Resource)]
+#[derive(Resource, Serialize, Deserialize, Clone)]
 pub struct MapSettings {
     pub width: i32,
     pub height: i32,

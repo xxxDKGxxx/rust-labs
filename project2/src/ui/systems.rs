@@ -22,6 +22,9 @@ use bevy_egui::{
     egui::{self, DragValue, Window},
 };
 
+use crate::ai::systems::AiTurnMessage;
+use crate::common::components::GridPosition;
+use crate::common::messages::SaveGameMessage;
 use crate::country::messages::ChangeRelationMessage;
 use crate::{
     GameState, InGameStates,
@@ -124,7 +127,6 @@ pub struct ControlsUiResources<'w> {
     map_settings: Res<'w, MapSettings>,
     current_state: Res<'w, State<InGameStates>>,
     diplomacy: Res<'w, Diplomacy>,
-    ui_model: ResMut<'w, UiModel>,
     next_state: ResMut<'w, NextState<InGameStates>>,
 }
 
@@ -132,9 +134,10 @@ pub fn setup_ui(
     mut contexts: EguiContexts,
     mut msgs: UiGameMessages,
     mut resources: ControlsUiResources,
+    mut ui_model: ResMut<UiModel>,
     ownership_tiles: Query<(&OwnershipTile, &GridPosition)>,
     map_tiles: Query<(&MapTile, Has<Building>)>,
-    army: Query<&Army, With<MapTile>>,
+    army_query: Query<(Entity, &Army, &GridPosition)>,
 ) -> Result<()> {
     let ctx = contexts.ctx_mut()?;
     let building_cost = resources.map_settings.building_cost;
@@ -144,12 +147,16 @@ pub fn setup_ui(
             &resources.selection_state,
             &ownership_tiles,
             &resources.countries,
-        ) && let Some((_, selected_tile_entity)) =
+        ) && let Some((selected_tile_pos, selected_tile_entity)) =
             get_selected_tile_from_selection_state(&resources.selection_state)
         {
             country_ui(ui, country);
 
             let (_, has_building) = map_tiles.get(selected_tile_entity)?;
+
+            let army_at_pos = army_query
+                .iter()
+                .find(|(_, _, pos)| pos.x == selected_tile_pos.0 && pos.y == selected_tile_pos.1);
 
             if resources.player_data.country_idx == idx {
                 if !has_building {
@@ -159,50 +166,87 @@ pub fn setup_ui(
                 army_ui(
                     &mut resources,
                     &mut msgs.spawn_army,
-                    army,
+                    army_at_pos.map(|(e, a, _)| (e, a)),
                     ui,
                     idx,
                     selected_tile_entity,
+                    &mut ui_model,
                 );
             } else {
-                ui.heading("Diplomacy");
-
-                let relation = resources
-                    .diplomacy
-                    .get_relation(resources.player_data.country_idx, idx);
-
-                ui.label(format!("Relation: {}", relation));
-
-                if let RelationStatus::AtWar = relation {
-                    if ui.button("Peace").clicked() {
-                        msgs.change_relation.write(ChangeRelationMessage {
-                            country_a_idx: resources.player_data.country_idx,
-                            country_b_idx: idx,
-                            relation: RelationStatus::Neutral,
-                        });
-                    }
-                }
-
-                if let RelationStatus::Neutral = relation {
-                    if ui.button("Declare war").clicked() {
-                        msgs.change_relation.write(ChangeRelationMessage {
-                            country_a_idx: resources.player_data.country_idx,
-                            country_b_idx: idx,
-                            relation: RelationStatus::AtWar,
-                        });
-                    }
-                }
-
-                ui.separator();
+                diplomacy_ui(&mut msgs, &resources, ui, idx);
             }
         }
 
         turn_ui(&mut msgs, &mut resources, ui);
 
+        if ui.button("Save").clicked() {
+            ui_model.save_popup_open = true;
+        }
+
+        let mut is_open = ui_model.save_popup_open;
+
+        if ui_model.save_popup_open {
+            egui::Window::new("Zapisz grę")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .open(&mut is_open)
+                .show(ctx, |ui| {
+                    ui.label("Save name:");
+                    ui.text_edit_singleline(&mut ui_model.save_file_name);
+                    if ui.button("Save").clicked() {
+                        msgs.save_game.write(SaveGameMessage {
+                            save_name: ui_model.save_file_name.clone(),
+                        });
+                        ui_model.save_popup_open = false;
+                        ui.close();
+                    }
+                });
+        }
+
+        ui_model.save_popup_open = is_open;
+
         Ok(())
     });
 
     Ok(())
+}
+
+fn diplomacy_ui(
+    msgs: &mut UiGameMessages<'_>,
+    resources: &ControlsUiResources<'_>,
+    ui: &mut egui::Ui,
+    idx: usize,
+) {
+    ui.heading("Diplomacy");
+
+    let relation = resources
+        .diplomacy
+        .get_relation(resources.player_data.country_idx, idx);
+
+    ui.label(format!("Relation: {}", relation));
+
+    if let RelationStatus::AtWar = relation
+        && ui.button("Peace").clicked()
+    {
+        msgs.change_relation.write(ChangeRelationMessage {
+            country_a_idx: resources.player_data.country_idx,
+            country_b_idx: idx,
+            relation: RelationStatus::Neutral,
+        });
+    }
+
+    if let RelationStatus::Neutral = relation
+        && ui.button("Declare war").clicked()
+    {
+        msgs.change_relation.write(ChangeRelationMessage {
+            country_a_idx: resources.player_data.country_idx,
+            country_b_idx: idx,
+            relation: RelationStatus::AtWar,
+        });
+    }
+
+    ui.separator();
 }
 
 pub fn display_country_name(
@@ -334,7 +378,7 @@ fn turn_ui(
 
     if ui.button("End Turn").clicked() {
         // if resources.player_data.country_idx == resources.countries.countries.len() - 1 {
-        msgs.next_turn.write(NextTurnMessage {});
+        msgs.ai_turn.write(AiTurnMessage {});
         // resources.player_data.country_idx = 0;
         // } else {
         // resources.player_data.country_idx += 1;
@@ -347,30 +391,30 @@ fn turn_ui(
 fn army_ui(
     resources: &mut ControlsUiResources<'_>,
     msgw: &mut MessageWriter<'_, SpawnArmyMessage>,
-    army: Query<'_, '_, &Army, With<MapTile>>,
+    army_at_pos: Option<(Entity, &Army)>,
     ui: &mut egui::Ui,
     idx: usize,
     selected_tile_entity: Entity,
+    ui_model: &mut UiModel,
 ) {
     ui.heading("Army");
-    ui.add(DragValue::new(
-        &mut resources.ui_model.selected_number_of_units,
-    ));
+    ui.add(DragValue::new(&mut ui_model.selected_number_of_units));
     ui.label(format!("Unit cost: {}", resources.map_settings.unit_cost));
 
     if ui.button("Recruit").clicked() {
         msgw.write(SpawnArmyMessage {
             tile_entity: selected_tile_entity,
             country_idx: idx,
-            amount: resources.ui_model.selected_number_of_units,
+            amount: ui_model.selected_number_of_units,
         });
     }
 
     if ui.button("Move").clicked()
         && *resources.current_state != InGameStates::MovingArmy
-        && army.get(selected_tile_entity).is_ok()
+        && army_at_pos.is_some()
+        && let Some((entity, _)) = army_at_pos
     {
-        resources.ui_model.army_entity_being_moved = Some(selected_tile_entity);
+        ui_model.army_entity_being_moved = Some(entity);
         resources.next_state.set(InGameStates::MovingArmy);
     }
 

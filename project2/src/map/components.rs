@@ -1,6 +1,7 @@
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Serialize, Deserialize, Clone)]
 pub enum MapTileType {
     Water,
     Sand,
@@ -21,7 +22,7 @@ impl From<&MapTileType> for Color {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Serialize, Deserialize, Clone)]
 pub struct MapTile {
     pub tile_type: MapTileType,
 }
@@ -32,29 +33,13 @@ impl MapTile {
     }
 }
 
-#[derive(Component, Debug, PartialEq, Clone, Copy, Eq, Hash)]
-pub struct GridPosition {
-    pub x: i32,
-    pub y: i32,
-}
-
-impl GridPosition {
-    pub fn new(x: i32, y: i32) -> Self {
-        Self { x, y }
-    }
-
-    pub fn distance(&self, other: &Self) -> f32 {
-        (((self.x - other.x) as f32).powi(2) + ((self.y - other.y) as f32).powi(2)).sqrt()
-    }
-}
-
 #[derive(Component)]
 pub struct SelectionCursor {}
 
 #[derive(Component)]
 pub struct Building {}
 
-#[derive(Component, Clone)]
+#[derive(Component, Clone, Debug, Serialize, Deserialize)]
 pub struct Army {
     pub country_idx: usize,
     pub number_of_units: i32,

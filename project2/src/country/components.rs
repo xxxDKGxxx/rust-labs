@@ -1,6 +1,7 @@
 use bevy::ecs::component::Component;
+use serde::{Deserialize, Serialize};
 
-#[derive(Component)]
+#[derive(Component, Deserialize, Serialize, Clone, Copy)]
 pub struct OwnershipTile {
     pub country_id: Option<usize>,
 }

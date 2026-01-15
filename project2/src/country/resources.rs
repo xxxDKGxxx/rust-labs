@@ -5,8 +5,10 @@ use bevy::{
     ecs::{resource::Resource, world::FromWorld},
     platform::collections::HashMap,
 };
+use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize, Clone)]
 pub struct Country {
     pub name: String,
     pub color: Color,
@@ -23,7 +25,7 @@ impl Country {
     }
 }
 
-#[derive(Resource)]
+#[derive(Resource, Serialize, Deserialize, Clone)]
 pub struct Countries {
     pub countries: Vec<Country>,
 }
@@ -42,14 +44,14 @@ impl FromWorld for Countries {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum RelationStatus {
     Neutral,
     AtWar,
 }
 
 impl RelationStatus {
-    pub fn to_string(&self) -> String {
+    fn to_str(self) -> String {
         match self {
             RelationStatus::Neutral => "Neutral".into(),
             RelationStatus::AtWar => "At war".into(),
@@ -59,27 +61,25 @@ impl RelationStatus {
 
 impl Display for RelationStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.to_string())
+        write!(f, "{}", self.to_str())
     }
 }
 
-#[derive(Resource, Default)]
+#[serde_as]
+#[derive(Resource, Default, Serialize, Deserialize, Clone)]
 pub struct Diplomacy {
-    relatons: HashMap<(usize, usize), RelationStatus>,
+    #[serde_as(as = "Vec<(_, _)>")]
+    relatons: std::collections::HashMap<(usize, usize), RelationStatus>,
 }
 
 impl Diplomacy {
     fn handle_key(c1: usize, c2: usize) -> (usize, usize) {
-        if c1 < c2 {
-            return (c1, c2);
-        } else {
-            (c2, c1)
-        }
+        if c1 < c2 { (c1, c2) } else { (c2, c1) }
     }
 
     pub fn new() -> Self {
         Self {
-            relatons: HashMap::new(),
+            relatons: std::collections::HashMap::new(),
         }
     }
 

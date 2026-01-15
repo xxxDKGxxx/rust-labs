@@ -4,6 +4,7 @@ use bevy_egui::{EguiContexts, EguiPlugin};
 
 use crate::{
     ai::AiPlugin,
+    common::CommonPlugin,
     country::CountryPlugin,
     map::{MapPlugin, resources::MapSettings},
     player::PlayerPlugin,
@@ -49,6 +50,7 @@ fn main() {
             UiPlugin {},
             PlayerPlugin {},
             AiPlugin {},
+            CommonPlugin {},
         ))
         .init_state::<GameState>()
         .add_sub_state::<InGameStates>()

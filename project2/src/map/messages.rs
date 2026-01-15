@@ -1,6 +1,6 @@
 use bevy::ecs::{entity::Entity, message::Message};
 
-use crate::map::components::GridPosition;
+use crate::common::components::GridPosition;
 
 #[derive(Message)]
 pub struct BuildBuildingMessage {

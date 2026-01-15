@@ -48,6 +48,7 @@ impl Plugin for CountryPlugin {
                 (
                     update_ownership_tiles.after(setup_ownership_tiles),
                     update_country_flag_system.after(update_ownership_tiles),
+                    save_countries_system.pipe(log_error),
                 )
                     .run_if(in_state(GameState::InGame)),
             );
