@@ -1,13 +1,14 @@
 use bevy::ecs::{entity::Entity, resource::Resource, world::FromWorld};
 use bevy::image::Image;
 use bevy::prelude::Handle;
+use serde::{Deserialize, Serialize};
 
 #[derive(Resource, Default)]
 pub struct MenuIcons {
     pub country_flags: Vec<Handle<Image>>,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Serialize, Deserialize)]
 pub struct TurnCounter {
     pub count: u32,
 }
@@ -16,6 +17,11 @@ impl FromWorld for TurnCounter {
     fn from_world(_: &mut bevy::ecs::world::World) -> Self {
         Self { count: 0 }
     }
+}
+
+#[derive(Resource, Default)]
+pub struct GameLoadState {
+    pub save_name: Option<String>,
 }
 
 #[derive(Resource)]

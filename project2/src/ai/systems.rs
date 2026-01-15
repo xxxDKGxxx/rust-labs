@@ -43,14 +43,11 @@ pub fn ai_system(mut params: AiSystemParams) {
     if params.ai_msgr.read().count() == 0 {
         return;
     }
-
     let (ownership_map, country_owned_positions) = build_maps(&params.ownership_tiles);
-
     for (country_idx, country) in params.countries.countries.iter().enumerate() {
         if country_idx == params.player_data.country_idx {
             continue;
         }
-
         process_diplomacy(
             country_idx,
             &params.countries,
@@ -82,13 +79,15 @@ pub fn ai_system(mut params: AiSystemParams) {
             &mut params.army_movements,
         );
     }
-
     params.msgr.write(NextTurnMessage {});
 }
 
+type OwnershipMap = HashMap<(i32, i32), usize>;
+type CountryOwnedPositionsMap = HashMap<usize, Vec<(i32, i32)>>;
+
 fn build_maps(
     ownership_tiles: &Query<(&OwnershipTile, &GridPosition)>,
-) -> (HashMap<(i32, i32), usize>, HashMap<usize, Vec<(i32, i32)>>) {
+) -> (OwnershipMap, CountryOwnedPositionsMap) {
     let mut ownership_map = HashMap::new();
     let mut country_owned_positions = HashMap::new();
 

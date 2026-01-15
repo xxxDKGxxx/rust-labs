@@ -29,6 +29,9 @@ pub enum GameState {
     #[default]
     Menu,
     CountrySelection,
+    LoadGame,
+    Loading,
+    Generating,
     InGame,
 }
 
@@ -45,8 +48,8 @@ fn main() {
         .add_plugins((
             DefaultPlugins,
             EguiPlugin::default(),
-            MapPlugin {},
             CountryPlugin {},
+            MapPlugin {},
             UiPlugin {},
             PlayerPlugin {},
             AiPlugin {},

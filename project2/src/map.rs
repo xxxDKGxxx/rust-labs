@@ -1,7 +1,9 @@
 use bevy::prelude::*;
 
 use crate::{
-    GameState, InGameStates, log_error,
+    GameState, InGameStates,
+    common::{GenerateSet, LoadSet},
+    log_error,
     map::{
         messages::{BuildBuildingMessage, SpawnArmyMessage},
         resources::*,
@@ -22,7 +24,15 @@ impl Plugin for MapPlugin {
             .init_resource::<SelectionState>()
             .init_resource::<MapVisibilityState>()
             .init_resource::<ArmyMovements>()
-            .add_systems(OnEnter(GameState::InGame), (setup_map, setup_cursor))
+            .add_systems(
+                OnEnter(GameState::Generating),
+                setup_map.in_set(GenerateSet::Generate),
+            )
+            .add_systems(
+                OnEnter(GameState::Loading),
+                load_map_system.pipe(log_error).in_set(LoadSet::Load),
+            )
+            .add_systems(OnEnter(GameState::InGame), setup_cursor)
             .add_systems(
                 Update,
                 (
@@ -48,6 +58,7 @@ impl Plugin for MapPlugin {
                 (
                     move_army_system.pipe(log_error),
                     save_map_system.pipe(log_error),
+                    sync_army_colors_system,
                 )
                     .run_if(in_state(GameState::InGame)),
             )

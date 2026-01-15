@@ -1,11 +1,15 @@
 use bevy::{
     app::*,
     ecs::{schedule::IntoScheduleConfigs, system::IntoSystem},
-    state::{condition::in_state, state::OnEnter},
+    state::{
+        condition::in_state,
+        state::{OnEnter, OnExit},
+    },
 };
 
 use crate::{
     GameState,
+    common::{GenerateSet, LoadSet},
     country::{
         messages::ChangeRelationMessage,
         resources::{Countries, Diplomacy},
@@ -28,12 +32,21 @@ impl Plugin for CountryPlugin {
             .insert_resource(Diplomacy::new())
             .add_message::<ChangeRelationMessage>()
             .add_systems(
-                OnEnter(GameState::InGame),
+                OnEnter(GameState::Generating),
                 (
                     setup_countries_system.after(setup_map),
                     setup_ownership_tiles.after(setup_countries_system),
                     setup_country_flags_system.after(setup_ownership_tiles),
-                ),
+                )
+                    .in_set(GenerateSet::Generate),
+            )
+            .add_systems(
+                OnEnter(GameState::Loading),
+                load_countries_system.pipe(log_error).in_set(LoadSet::Load),
+            )
+            .add_systems(
+                OnExit(GameState::Loading),
+                ownership_tile_position_sync_system,
             )
             .add_systems(
                 Update,
@@ -46,7 +59,7 @@ impl Plugin for CountryPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    update_ownership_tiles.after(setup_ownership_tiles),
+                    update_ownership_tiles,
                     update_country_flag_system.after(update_ownership_tiles),
                     save_countries_system.pipe(log_error),
                 )

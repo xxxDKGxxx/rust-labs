@@ -3,7 +3,6 @@ use std::fmt::Display;
 use bevy::{
     color::Color,
     ecs::{resource::Resource, world::FromWorld},
-    platform::collections::HashMap,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;

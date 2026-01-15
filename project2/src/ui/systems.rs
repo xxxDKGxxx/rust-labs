@@ -21,10 +21,12 @@ use bevy_egui::{
     EguiContexts,
     egui::{self, DragValue, Window},
 };
+use std::fs;
 
 use crate::ai::systems::AiTurnMessage;
 use crate::common::components::GridPosition;
 use crate::common::messages::SaveGameMessage;
+use crate::common::systems::{SAVE_PATH, get_save_path};
 use crate::country::messages::ChangeRelationMessage;
 use crate::{
     GameState, InGameStates,
@@ -39,7 +41,7 @@ use crate::{
     ui::{
         components::{ArmySizeLabel, CountryLabel},
         messages::UiGameMessages,
-        resources::{MenuIcons, TurnCounter, UiModel},
+        resources::{GameLoadState, MenuIcons, TurnCounter, UiModel},
     },
 };
 
@@ -212,6 +214,43 @@ pub fn setup_ui(
     Ok(())
 }
 
+const SAVE_FILE_NAME: &str = "save_turn.json";
+
+pub fn save_turn_counter_system(
+    mut save_game_message_reader: MessageReader<SaveGameMessage>,
+    turn_counter: Res<TurnCounter>,
+) -> anyhow::Result<()> {
+    for save_game_message in save_game_message_reader.read() {
+        let save_json = serde_json::to_string_pretty(&*turn_counter)?;
+
+        std::fs::create_dir_all(format!("{}/{}", SAVE_PATH, save_game_message.save_name))?;
+        std::fs::write(
+            format!(
+                "{}/{}/{}",
+                SAVE_PATH, save_game_message.save_name, SAVE_FILE_NAME
+            ),
+            save_json,
+        )?;
+    }
+
+    Ok(())
+}
+
+pub fn load_turn_counter_system(
+    mut turn_counter: ResMut<TurnCounter>,
+    load_state: Res<GameLoadState>,
+) -> anyhow::Result<()> {
+    if let Some(save_name) = &load_state.save_name {
+        let path = format!("{}/{}", get_save_path(save_name), SAVE_FILE_NAME);
+        let data = std::fs::read_to_string(path)?;
+        let turn_counter_saved: TurnCounter = serde_json::from_str(&data)?;
+
+        *turn_counter = turn_counter_saved;
+    }
+
+    Ok(())
+}
+
 fn diplomacy_ui(
     msgs: &mut UiGameMessages<'_>,
     resources: &ControlsUiResources<'_>,
@@ -304,6 +343,15 @@ pub fn main_menu_system(
 
             ui.add_space(5.0);
 
+            if ui
+                .add(egui::Button::new("Load Game").min_size([100.0, 30.0].into()))
+                .clicked()
+            {
+                next_state.set(GameState::LoadGame);
+            }
+
+            ui.add_space(5.0);
+
             if ui.button("Options").clicked() {
                 println!("Tu byłyby opcje...");
             }
@@ -312,6 +360,44 @@ pub fn main_menu_system(
 
             if ui.button("Quit").clicked() {
                 exit.write(AppExit::Success);
+            }
+        });
+
+    Ok(())
+}
+
+pub fn load_game_menu_system(
+    mut contexts: EguiContexts,
+    mut next_state: ResMut<NextState<GameState>>,
+    mut load_state: ResMut<GameLoadState>,
+) -> anyhow::Result<()> {
+    let ctx = contexts.ctx_mut()?;
+
+    egui::Window::new("Load Game")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.heading("Select a save");
+            ui.add_space(10.0);
+
+            if let Ok(paths) = fs::read_dir("./saves") {
+                for path in paths.flatten() {
+                    let path = path.path();
+                    if path.is_dir()
+                        && let Some(save_name) = path.file_name()
+                        && let Some(save_name_str) = save_name.to_str()
+                        && ui.button(save_name_str).clicked()
+                    {
+                        load_state.save_name = Some(save_name_str.to_owned());
+                        next_state.set(GameState::Loading);
+                    }
+                }
+            }
+
+            ui.add_space(10.0);
+            if ui.button("Back").clicked() {
+                next_state.set(GameState::Menu);
             }
         });
 
@@ -493,7 +579,7 @@ pub fn country_selection_system(
                         .clicked()
                     {
                         player_data.country_idx = i;
-                        next_state.set(GameState::InGame);
+                        next_state.set(GameState::Generating);
                     }
                 }
             });

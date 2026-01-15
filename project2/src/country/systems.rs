@@ -13,14 +13,14 @@ use bevy::{
     sprite::Sprite,
     transform::components::Transform,
 };
-use rand::{Rng, rng};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     common::{
         components::GridPosition,
         messages::{NextTurnMessage, SaveGameMessage},
-        systems::SAVE_PATH,
+        systems::{SAVE_PATH, get_save_path},
     },
     country::{
         components::{CountryFlag, OwnershipTile},
@@ -28,6 +28,7 @@ use crate::{
         resources::*,
     },
     map::{components::*, resources::MapSettings},
+    ui::resources::GameLoadState,
 };
 
 pub fn setup_countries_system(mut countries: ResMut<Countries>) {
@@ -57,7 +58,7 @@ pub fn setup_ownership_tiles(
         .map(|(_, pos, _)| pos)
         .collect();
 
-    let mut rng = rng();
+    let mut rng = rand::rng();
 
     if tile_poses_without_water.len() < countries.countries.len() {
         return;
@@ -71,13 +72,13 @@ pub fn setup_ownership_tiles(
         }
     }
 
-    for (tile, pos, transform) in tiles_query {
+    for (tile, pos, transform) in tiles_query.iter() {
         if tile.tile_type == MapTileType::Water {
             commands.spawn((
                 Sprite {
                     ..Default::default()
                 },
-                Transform::from_xyz(transform.translation.x, transform.translation.y, 50.0),
+                Transform::from_xyz(transform.translation.x, transform.translation.y, 0.0),
                 OwnershipTile::new(None),
                 GridPosition::new(pos.x, pos.y),
             ));
@@ -109,10 +110,10 @@ pub fn setup_ownership_tiles(
 }
 
 pub fn update_ownership_tiles(
-    ownership_tiles_query: Query<(&mut Sprite, &OwnershipTile), Changed<OwnershipTile>>,
+    mut ownership_tiles_query: Query<(&mut Sprite, &OwnershipTile), Changed<OwnershipTile>>,
     countries: Res<Countries>,
 ) {
-    for (mut sprite, tile) in ownership_tiles_query {
+    for (mut sprite, tile) in ownership_tiles_query.iter_mut() {
         match tile.country_id {
             Some(id) => {
                 let country = &countries.countries[id];
@@ -131,7 +132,7 @@ pub fn money_gathering_system(
     ownership_tiles: Query<(&OwnershipTile, &GridPosition)>,
 ) -> anyhow::Result<()> {
     for _ in msgr.read() {
-        for (ownership_tile, ownership_tile_grid_pos) in ownership_tiles {
+        for (ownership_tile, ownership_tile_grid_pos) in &ownership_tiles {
             if let Some(country_id) = ownership_tile.country_id {
                 countries_resource.countries[country_id].money += 1;
                 let map_tile_at_country_pos = map_tiles
@@ -191,20 +192,19 @@ pub fn update_country_flag_system(
     mut commands: Commands,
     changed_ownership_tiles_query: Query<Entity, Changed<OwnershipTile>>,
     ownership_tiles_query: Query<(&OwnershipTile, &Transform)>,
-    country_flags: Query<(Entity, &CountryFlag, &mut Transform), Without<OwnershipTile>>,
+    mut country_flags: Query<(Entity, &CountryFlag, &mut Transform), Without<OwnershipTile>>,
 ) {
     if changed_ownership_tiles_query.is_empty() {
         return;
     }
 
-    for (entity, country_flag, mut transform) in country_flags {
+    for (entity, country_flag, mut transform) in country_flags.iter_mut() {
         let owned_tiles = ownership_tiles_query
             .iter()
             .filter(|(o, _)| o.country_id == Some(country_flag.idx))
             .collect::<Vec<_>>();
 
         if owned_tiles.is_empty() {
-            println!("Despawning");
             commands.entity(entity).despawn();
             continue;
         }
@@ -238,7 +238,7 @@ pub fn save_countries_system(
 ) -> anyhow::Result<()> {
     for save_game_message in save_game_message_reader.read() {
         let mut ownership_tiles_vec: Vec<(OwnershipTile, GridPosition)> = Vec::new();
-        for (ownership_tile, grid_position) in ownership_tiles_query {
+        for (ownership_tile, grid_position) in ownership_tiles_query.iter() {
             ownership_tiles_vec.push((*ownership_tile, *grid_position));
         }
 
@@ -260,4 +260,56 @@ pub fn save_countries_system(
     }
 
     Ok(())
+}
+
+pub fn load_countries_system(
+    mut commands: Commands,
+    load_state: Res<GameLoadState>,
+    map_settings: Res<MapSettings>,
+) -> anyhow::Result<()> {
+    if let Some(save_name) = &load_state.save_name {
+        let path = format!("{}/{}", get_save_path(save_name), SAVE_FILE_NAME);
+        let data = std::fs::read_to_string(path)?;
+        let state: CountriesSaveState = serde_json::from_str(&data)?;
+
+        commands.insert_resource(state.countries);
+        commands.insert_resource(state.diplomacy);
+
+        for (ownership_tile, grid_position) in state.ownership_tiles {
+            commands.spawn((
+                ownership_tile,
+                grid_position,
+                Sprite {
+                    custom_size: Some(Vec2::new(
+                        map_settings.tile_size as f32,
+                        map_settings.tile_size as f32,
+                    )),
+                    ..Default::default()
+                },
+                Transform::from_xyz(0.0, 0.0, 0.0), // Position will be updated by another system
+            ));
+        }
+    }
+    Ok(())
+}
+
+type PositionTransformForMapTilesOnlyQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static GridPosition, &'static Transform),
+    (With<MapTile>, Without<OwnershipTile>),
+>;
+
+pub fn ownership_tile_position_sync_system(
+    mut ownership_tiles: Query<(&GridPosition, &mut Transform), Changed<OwnershipTile>>,
+    map_tiles: PositionTransformForMapTilesOnlyQuery,
+) {
+    for (ownership_grid_pos, mut ownership_transform) in ownership_tiles.iter_mut() {
+        if let Some((_, map_tile_transform)) = map_tiles
+            .iter()
+            .find(|(grid_pos, _)| *grid_pos == ownership_grid_pos)
+        {
+            ownership_transform.translation = map_tile_transform.translation.with_z(0.0);
+        }
+    }
 }

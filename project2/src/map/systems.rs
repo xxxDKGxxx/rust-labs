@@ -13,7 +13,7 @@ use crate::{
     common::{
         components::GridPosition,
         messages::{NextTurnMessage, SaveGameMessage},
-        systems::SAVE_PATH,
+        systems::{SAVE_PATH, get_save_path},
     },
     country::{
         components::OwnershipTile,
@@ -24,6 +24,7 @@ use crate::{
         messages::{BuildBuildingMessage, MoveArmyMessage, SpawnArmyMessage},
         resources::*,
     },
+    ui::resources::GameLoadState,
 };
 
 pub fn setup_map(
@@ -149,7 +150,7 @@ pub fn map_visibility_toggling_system(
 
 pub fn update_visibility_system(
     map_state: Res<MapVisibilityState>,
-    map_tile_visibility: Query<&mut Visibility, With<MapTile>>,
+    mut map_tile_visibility: Query<&mut Visibility, With<MapTile>>,
 ) {
     if !map_state.is_changed() {
         return;
@@ -160,7 +161,7 @@ pub fn update_visibility_system(
         MapVisibilityState::PoliticalOnly => Visibility::Hidden,
     };
 
-    for mut tile_visibility in map_tile_visibility {
+    for mut tile_visibility in map_tile_visibility.iter_mut() {
         *tile_visibility = vis;
     }
 }
@@ -200,13 +201,18 @@ pub fn build_building_system(
     }
 }
 
+#[derive(SystemParam)]
+pub struct SpawnArmySystemQueries<'w, 's> {
+    army_query: Query<'w, 's, (&'static mut Army, &'static GridPosition)>,
+    map_tile_query: Query<'w, 's, &'static GridPosition, With<MapTile>>,
+    ownership_tile_query: Query<'w, 's, (&'static GridPosition, &'static OwnershipTile)>,
+}
+
 pub fn spawn_army_system(
     mut commands: Commands,
     mut msgr: MessageReader<SpawnArmyMessage>,
     mut countries: ResMut<Countries>,
-    mut army_query: Query<(&mut Army, &GridPosition)>,
-    map_tile_query: Query<&GridPosition, With<MapTile>>,
-    ownership_tile_query: Query<(&GridPosition, &OwnershipTile)>,
+    mut queries: SpawnArmySystemQueries,
     map_settings: Res<MapSettings>,
     asset_server: Res<AssetServer>,
 ) -> anyhow::Result<()> {
@@ -216,8 +222,9 @@ pub fn spawn_army_system(
         if amount < 1 {
             continue;
         }
-        let map_tile_grid_position = map_tile_query.get(spawn_army_message.tile_entity)?;
-        let Some((_, ownership_tile)) = ownership_tile_query
+        let map_tile_grid_position = queries.map_tile_query.get(spawn_army_message.tile_entity)?;
+        let Some((_, ownership_tile)) = queries
+            .ownership_tile_query
             .iter()
             .find(|(pos, _)| *pos == map_tile_grid_position)
         else {
@@ -235,7 +242,8 @@ pub fn spawn_army_system(
         } else {
             return Err(anyhow!("Tried spawning units on unowned land"));
         }
-        let existing_army = army_query
+        let existing_army = queries
+            .army_query
             .iter_mut()
             .find(|(_, pos)| *pos == map_tile_grid_position);
         if let Some((mut army, _)) = existing_army {
@@ -256,7 +264,6 @@ pub fn spawn_army_system(
                 *map_tile_grid_position,
                 &asset_server,
                 &map_settings,
-                &countries,
             );
         }
 
@@ -285,11 +292,11 @@ pub fn save_map_system(
         let mut armies: Vec<(Army, GridPosition)> = Vec::new();
         let mut map_tiles: Vec<(MapTile, GridPosition, bool)> = Vec::new();
 
-        for (army, position) in armies_query {
+        for (army, position) in armies_query.iter() {
             armies.push((army.clone(), *position));
         }
 
-        for (map_tile, position, has_building) in map_tiles_query {
+        for (map_tile, position, has_building) in map_tiles_query.iter() {
             map_tiles.push(((*map_tile).clone(), *position, has_building));
         }
 
@@ -311,6 +318,70 @@ pub fn save_map_system(
         )?;
     }
 
+    Ok(())
+}
+
+pub fn load_map_system(
+    mut commands: Commands,
+    load_state: Res<GameLoadState>,
+    asset_server: Res<AssetServer>,
+    mut tile_grid: ResMut<TileMapGrid>,
+) -> anyhow::Result<()> {
+    if let Some(save_name) = &load_state.save_name {
+        let path = format!("{}/{}", get_save_path(save_name), SAVE_FILE_NAME);
+        let data = std::fs::read_to_string(path)?;
+        let state: MapSaveState = serde_json::from_str(&data)?;
+
+        commands.insert_resource(state.map_settings.clone());
+
+        for (map_tile, grid_position, has_building) in state.map_tiles {
+            let world_pos = grid_to_world(&grid_position, &state.map_settings);
+            let mut entity_commands = commands.spawn((
+                map_tile.clone(),
+                grid_position,
+                Sprite {
+                    color: Color::from(&map_tile.tile_type),
+                    custom_size: Some(Vec2::new(
+                        state.map_settings.tile_size as f32 - 3.0,
+                        state.map_settings.tile_size as f32 - 3.0,
+                    )),
+                    ..Default::default()
+                },
+                Transform::from_translation(world_pos.with_z(50.0)),
+            ));
+            if has_building {
+                entity_commands.insert(Building {});
+                entity_commands.with_children(|parent| {
+                    let building_texture = asset_server.load("building_texture.png");
+
+                    parent.spawn((
+                        Sprite {
+                            image: building_texture,
+                            custom_size: Some(Vec2::new(
+                                state.map_settings.tile_size as f32,
+                                state.map_settings.tile_size as f32,
+                            )),
+                            ..Default::default()
+                        },
+                        Transform::from_xyz(0.0, 0.0, 4.0),
+                    ));
+                });
+            }
+            tile_grid
+                .grid
+                .insert((grid_position.x, grid_position.y), entity_commands.id());
+        }
+
+        for (army, grid_position) in state.armies {
+            spawn_army_unit(
+                &mut commands,
+                army,
+                grid_position,
+                &asset_server,
+                &state.map_settings,
+            );
+        }
+    }
     Ok(())
 }
 
@@ -400,7 +471,6 @@ pub fn move_army_system(
     asset_server: Res<AssetServer>,
     map_settings: Res<MapSettings>,
     diplomacy_resource: Res<Diplomacy>,
-    countries_resource: Res<Countries>,
 ) -> anyhow::Result<()> {
     if next_turn_msgr.is_empty() {
         return Ok(());
@@ -415,7 +485,6 @@ pub fn move_army_system(
                 &diplomacy_resource,
                 &asset_server,
                 &map_settings,
-                &countries_resource,
             )?;
         }
     }
@@ -443,6 +512,15 @@ pub fn army_ownership_claim_system(
     Ok(())
 }
 
+pub fn sync_army_colors_system(
+    mut army: Query<(&Army, &mut Sprite), Changed<Army>>,
+    countries: Res<Countries>,
+) {
+    for (army, mut sprite) in army.iter_mut() {
+        sprite.color = countries.countries[army.country_idx].color;
+    }
+}
+
 // helpers
 fn process_army_movement(
     commands: &mut Commands,
@@ -451,7 +529,6 @@ fn process_army_movement(
     diplomacy_resource: &Diplomacy,
     asset_server: &AssetServer,
     map_settings: &MapSettings,
-    countries: &Countries,
 ) -> anyhow::Result<()> {
     let (mut army, mut source_army_position) = queries
         .army_queries
@@ -487,7 +564,6 @@ fn process_army_movement(
             move_army_message.target_position,
             asset_server,
             map_settings,
-            countries,
         );
     }
 
@@ -557,9 +633,7 @@ fn spawn_army_unit(
     grid_position: GridPosition,
     asset_server: &AssetServer,
     map_settings: &MapSettings,
-    countries: &Countries,
 ) {
-    let country_idx = army.country_idx;
     let world_pos = grid_to_world(&grid_position, map_settings);
 
     commands.spawn((
@@ -571,7 +645,6 @@ fn spawn_army_unit(
                 x: map_settings.tile_size as f32,
                 y: map_settings.tile_size as f32,
             }),
-            color: countries.countries[country_idx].color,
             ..Default::default()
         },
         Transform::from_translation(world_pos.with_z(70.0)),

@@ -3,7 +3,7 @@ use crate::{
     common::messages::NextTurnMessage,
     log_error,
     ui::{
-        resources::{TurnCounter, UiModel},
+        resources::{GameLoadState, TurnCounter, UiModel},
         systems::*,
     },
 };
@@ -37,6 +37,16 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 EguiPrimaryContextPass,
+                load_game_menu_system
+                    .pipe(log_error)
+                    .run_if(in_state(GameState::LoadGame)),
+            )
+            .add_systems(
+                OnEnter(GameState::Loading),
+                load_turn_counter_system.pipe(log_error),
+            )
+            .add_systems(
+                EguiPrimaryContextPass,
                 country_selection_system
                     .pipe(log_error)
                     .run_if(in_state(GameState::CountrySelection)),
@@ -55,6 +65,7 @@ impl Plugin for UiPlugin {
                         display_country_name,
                         display_unit_count,
                         remove_army_label_system,
+                        save_turn_counter_system.pipe(log_error),
                     )
                         .run_if(in_state(GameState::InGame)),
                 ),
@@ -62,6 +73,7 @@ impl Plugin for UiPlugin {
             .add_message::<NextTurnMessage>()
             .init_resource::<TurnCounter>()
             .init_resource::<UiModel>()
+            .init_resource::<GameLoadState>()
             .init_resource::<resources::MenuIcons>();
     }
 }
