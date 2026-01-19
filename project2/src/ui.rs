@@ -3,6 +3,7 @@ use crate::{
     common::messages::NextTurnMessage,
     log_error,
     ui::{
+        messages::UiClickMessage,
         resources::{GameLoadState, TurnCounter, UiModel},
         systems::*,
     },
@@ -24,7 +25,7 @@ pub struct UiPlugin {}
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut bevy::app::App) {
         app.add_systems(OnEnter(GameState::InGame), setup_ui_label)
-            .add_systems(Startup, load_menu_icons)
+            .add_systems(Startup, (load_menu_icons, setup_audio))
             .add_systems(
                 EguiPrimaryContextPass,
                 (setup_ui.pipe(log_error),).run_if(in_state(GameState::InGame)),
@@ -53,7 +54,11 @@ impl Plugin for UiPlugin {
             )
             .add_systems(
                 Update,
-                update_turn_counter.run_if(in_state(GameState::InGame)),
+                (
+                    handle_audio,
+                    handle_change_relation_audio,
+                    update_turn_counter.run_if(in_state(GameState::InGame)),
+                ),
             )
             .add_systems(
                 PostUpdate,
@@ -71,6 +76,7 @@ impl Plugin for UiPlugin {
                 ),
             )
             .add_message::<NextTurnMessage>()
+            .add_message::<UiClickMessage>()
             .init_resource::<TurnCounter>()
             .init_resource::<UiModel>()
             .init_resource::<GameLoadState>()

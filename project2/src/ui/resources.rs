@@ -1,3 +1,4 @@
+use bevy::audio::AudioSource;
 use bevy::ecs::{entity::Entity, resource::Resource, world::FromWorld};
 use bevy::image::Image;
 use bevy::prelude::Handle;
@@ -22,6 +23,13 @@ impl FromWorld for TurnCounter {
 #[derive(Resource, Default)]
 pub struct GameLoadState {
     pub save_name: Option<String>,
+}
+
+#[derive(Resource)]
+pub struct UiSounds {
+    pub click_sound: Handle<AudioSource>,
+    pub war_sound: Handle<AudioSource>,
+    pub peace_sound: Handle<AudioSource>,
 }
 
 #[derive(Resource)]

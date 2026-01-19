@@ -38,20 +38,17 @@ pub fn setup_countries_system(mut countries: ResMut<Countries>) {
 
     for i in 0..COUNTRY_NUM {
         countries.countries.push(Country::new(
-            format!("C{i}"),
+            &format!("C{i}"),
             Color::Hsva(Hsva::hsv(360.0 / COUNTRY_NUM as f32 * i as f32, 1.0, 1.0)),
         ));
     }
 }
 
-pub fn setup_ownership_tiles(
-    mut commands: Commands,
-    countries: Res<Countries>,
-    tiles_query: Query<(&MapTile, &GridPosition, &Transform)>,
-    map_settings: Res<MapSettings>,
-) {
+fn select_capitals(
+    countries: &Res<Countries>,
+    tiles_query: &Query<(&MapTile, &GridPosition, &Transform)>,
+) -> HashSet<(i32, i32)> {
     let mut countries_capitals_set: HashSet<(i32, i32)> = HashSet::new();
-
     let tile_poses_without_water: Vec<_> = tiles_query
         .iter()
         .filter(|(tile, _, _)| tile.tile_type != MapTileType::Water)
@@ -61,7 +58,7 @@ pub fn setup_ownership_tiles(
     let mut rng = rand::rng();
 
     if tile_poses_without_water.len() < countries.countries.len() {
-        return;
+        return countries_capitals_set;
     }
 
     for _ in 0..countries.countries.len() {
@@ -71,17 +68,20 @@ pub fn setup_ownership_tiles(
             countries_capitals_set.insert((capital_pos.x, capital_pos.y));
         }
     }
+    countries_capitals_set
+}
+
+pub fn setup_ownership_tiles(
+    mut commands: Commands,
+    countries: Res<Countries>,
+    tiles_query: Query<(&MapTile, &GridPosition, &Transform)>,
+    map_settings: Res<MapSettings>,
+) {
+    let countries_capitals_set = select_capitals(&countries, &tiles_query);
 
     for (tile, pos, transform) in tiles_query.iter() {
         if tile.tile_type == MapTileType::Water {
-            commands.spawn((
-                Sprite {
-                    ..Default::default()
-                },
-                Transform::from_xyz(transform.translation.x, transform.translation.y, 0.0),
-                OwnershipTile::new(None),
-                GridPosition::new(pos.x, pos.y),
-            ));
+            spawn_ownership_tile(&mut commands, pos, transform, &map_settings, None);
             continue;
         }
 
@@ -93,20 +93,36 @@ pub fn setup_ownership_tiles(
             })
             .map(|(idx, _)| idx)
         {
-            commands.spawn((
-                Sprite {
-                    custom_size: Some(Vec2::new(
-                        map_settings.tile_size as f32,
-                        map_settings.tile_size as f32,
-                    )),
-                    ..Default::default()
-                },
-                Transform::from_xyz(transform.translation.x, transform.translation.y, 0.0),
-                OwnershipTile::new(Some(closest_country_idx)),
-                GridPosition::new(pos.x, pos.y),
-            ));
+            spawn_ownership_tile(
+                &mut commands,
+                pos,
+                transform,
+                &map_settings,
+                Some(closest_country_idx),
+            );
         }
     }
+}
+
+fn spawn_ownership_tile(
+    commands: &mut Commands<'_, '_>,
+    pos: &GridPosition,
+    transform: &Transform,
+    map_settings: &MapSettings,
+    country_id: Option<usize>,
+) {
+    commands.spawn((
+        Sprite {
+            custom_size: Some(Vec2::new(
+                map_settings.tile_size as f32,
+                map_settings.tile_size as f32,
+            )),
+            ..Default::default()
+        },
+        Transform::from_xyz(transform.translation.x, transform.translation.y, 0.0),
+        OwnershipTile::new(country_id),
+        GridPosition::new(pos.x, pos.y),
+    ));
 }
 
 pub fn update_ownership_tiles(

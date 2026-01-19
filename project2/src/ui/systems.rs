@@ -28,6 +28,8 @@ use crate::common::components::GridPosition;
 use crate::common::messages::SaveGameMessage;
 use crate::common::systems::{SAVE_PATH, get_save_path};
 use crate::country::messages::ChangeRelationMessage;
+use crate::ui::messages::UiClickMessage;
+use crate::ui::resources::UiSounds;
 use crate::{
     GameState, InGameStates,
     common::messages::NextTurnMessage,
@@ -44,6 +46,61 @@ use crate::{
         resources::{GameLoadState, MenuIcons, TurnCounter, UiModel},
     },
 };
+
+pub fn setup_audio(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let click_handle = asset_server.load("ui-click.mp3");
+    let war_handle = asset_server.load("war_short.mp3");
+    let peace_handle = asset_server.load("peace_short.mp3");
+
+    commands.insert_resource(UiSounds {
+        click_sound: click_handle,
+        war_sound: war_handle,
+        peace_sound: peace_handle,
+    });
+}
+
+pub fn handle_audio(
+    mut commands: Commands,
+    mut ui_click_message_reader: MessageReader<UiClickMessage>,
+    ui_sounds: Res<UiSounds>,
+) {
+    for _ in ui_click_message_reader.read() {
+        commands.spawn((
+            AudioPlayer(ui_sounds.click_sound.clone()),
+            PlaybackSettings::DESPAWN,
+        ));
+    }
+}
+
+pub fn handle_change_relation_audio(
+    mut commands: Commands,
+    mut relation_change_message_reader: MessageReader<ChangeRelationMessage>,
+    ui_sounds: Res<UiSounds>,
+    player_data: Res<PlayerData>,
+) {
+    for msg in relation_change_message_reader.read() {
+        if msg.country_a_idx != player_data.country_idx
+            && msg.country_b_idx != player_data.country_idx
+        {
+            continue;
+        }
+
+        match msg.relation {
+            RelationStatus::Neutral => {
+                commands.spawn((
+                    AudioPlayer(ui_sounds.peace_sound.clone()),
+                    PlaybackSettings::DESPAWN,
+                ));
+            }
+            RelationStatus::AtWar => {
+                commands.spawn((
+                    AudioPlayer(ui_sounds.war_sound.clone()),
+                    PlaybackSettings::DESPAWN,
+                ));
+            }
+        }
+    }
+}
 
 pub fn remove_army_label_system(
     mut commands: Commands,
@@ -132,6 +189,37 @@ pub struct ControlsUiResources<'w> {
     next_state: ResMut<'w, NextState<InGameStates>>,
 }
 
+fn save_popup_ui(ctx: &egui::Context, ui_model: &mut UiModel, msgs: &mut UiGameMessages) {
+    let mut is_open = ui_model.save_popup_open;
+    let mut saved = false;
+
+    if ui_model.save_popup_open {
+        egui::Window::new("Zapisz grę")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                ui.label("Save name:");
+                ui.text_edit_singleline(&mut ui_model.save_file_name);
+                if ui.button("Save").clicked() {
+                    msgs.ui_click_message.write(UiClickMessage {});
+                    msgs.save_game.write(SaveGameMessage {
+                        save_name: ui_model.save_file_name.clone(),
+                    });
+                    saved = true;
+                    ui.close();
+                }
+            });
+    }
+
+    if saved {
+        is_open = false;
+    }
+
+    ui_model.save_popup_open = is_open;
+}
+
 pub fn setup_ui(
     mut contexts: EguiContexts,
     mut msgs: UiGameMessages,
@@ -168,6 +256,7 @@ pub fn setup_ui(
                 army_ui(
                     &mut resources,
                     &mut msgs.spawn_army,
+                    &mut msgs.ui_click_message,
                     army_at_pos.map(|(e, a, _)| (e, a)),
                     ui,
                     idx,
@@ -182,31 +271,11 @@ pub fn setup_ui(
         turn_ui(&mut msgs, &mut resources, ui);
 
         if ui.button("Save").clicked() {
+            msgs.ui_click_message.write(UiClickMessage {});
             ui_model.save_popup_open = true;
         }
 
-        let mut is_open = ui_model.save_popup_open;
-
-        if ui_model.save_popup_open {
-            egui::Window::new("Zapisz grę")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                .open(&mut is_open)
-                .show(ctx, |ui| {
-                    ui.label("Save name:");
-                    ui.text_edit_singleline(&mut ui_model.save_file_name);
-                    if ui.button("Save").clicked() {
-                        msgs.save_game.write(SaveGameMessage {
-                            save_name: ui_model.save_file_name.clone(),
-                        });
-                        ui_model.save_popup_open = false;
-                        ui.close();
-                    }
-                });
-        }
-
-        ui_model.save_popup_open = is_open;
+        save_popup_ui(ctx, &mut ui_model, &mut msgs);
 
         Ok(())
     });
@@ -268,6 +337,7 @@ fn diplomacy_ui(
     if let RelationStatus::AtWar = relation
         && ui.button("Peace").clicked()
     {
+        msgs.ui_click_message.write(UiClickMessage {});
         msgs.change_relation.write(ChangeRelationMessage {
             country_a_idx: resources.player_data.country_idx,
             country_b_idx: idx,
@@ -278,6 +348,7 @@ fn diplomacy_ui(
     if let RelationStatus::Neutral = relation
         && ui.button("Declare war").clicked()
     {
+        msgs.ui_click_message.write(UiClickMessage {});
         msgs.change_relation.write(ChangeRelationMessage {
             country_a_idx: resources.player_data.country_idx,
             country_b_idx: idx,
@@ -319,10 +390,53 @@ pub fn update_turn_counter(
         turn_counter.as_mut().count += 1;
     }
 }
+fn main_menu_buttons(
+    ui: &mut egui::Ui,
+    next_state: &mut ResMut<NextState<GameState>>,
+    exit: &mut MessageWriter<AppExit>,
+    sound: &mut MessageWriter<UiClickMessage>,
+) {
+    ui.heading("Project 2");
+    ui.add_space(10.0);
+
+    if ui
+        .add(egui::Button::new("Start Game").min_size([100.0, 30.0].into()))
+        .clicked()
+    {
+        sound.write(UiClickMessage {});
+        next_state.set(GameState::CountrySelection);
+    }
+
+    ui.add_space(5.0);
+
+    if ui
+        .add(egui::Button::new("Load Game").min_size([100.0, 30.0].into()))
+        .clicked()
+    {
+        sound.write(UiClickMessage {});
+        next_state.set(GameState::LoadGame);
+    }
+
+    ui.add_space(5.0);
+
+    if ui.button("Options").clicked() {
+        sound.write(UiClickMessage {});
+        println!("Tu byłyby opcje...");
+    }
+
+    ui.add_space(5.0);
+
+    if ui.button("Quit").clicked() {
+        sound.write(UiClickMessage {});
+        exit.write(AppExit::Success);
+    }
+}
+
 pub fn main_menu_system(
     mut contexts: EguiContexts,
     mut next_state: ResMut<NextState<GameState>>,
     mut exit: MessageWriter<AppExit>,
+    mut sound: MessageWriter<UiClickMessage>,
 ) -> anyhow::Result<()> {
     let ctx = contexts.ctx_mut()?;
 
@@ -331,36 +445,7 @@ pub fn main_menu_system(
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
-            ui.heading("Project 2");
-            ui.add_space(10.0);
-
-            if ui
-                .add(egui::Button::new("Start Game").min_size([100.0, 30.0].into()))
-                .clicked()
-            {
-                next_state.set(GameState::CountrySelection);
-            }
-
-            ui.add_space(5.0);
-
-            if ui
-                .add(egui::Button::new("Load Game").min_size([100.0, 30.0].into()))
-                .clicked()
-            {
-                next_state.set(GameState::LoadGame);
-            }
-
-            ui.add_space(5.0);
-
-            if ui.button("Options").clicked() {
-                println!("Tu byłyby opcje...");
-            }
-
-            ui.add_space(5.0);
-
-            if ui.button("Quit").clicked() {
-                exit.write(AppExit::Success);
-            }
+            main_menu_buttons(ui, &mut next_state, &mut exit, &mut sound);
         });
 
     Ok(())
@@ -370,6 +455,7 @@ pub fn load_game_menu_system(
     mut contexts: EguiContexts,
     mut next_state: ResMut<NextState<GameState>>,
     mut load_state: ResMut<GameLoadState>,
+    mut ui_click_message_writer: MessageWriter<UiClickMessage>,
 ) -> anyhow::Result<()> {
     let ctx = contexts.ctx_mut()?;
 
@@ -389,6 +475,7 @@ pub fn load_game_menu_system(
                         && let Some(save_name_str) = save_name.to_str()
                         && ui.button(save_name_str).clicked()
                     {
+                        ui_click_message_writer.write(UiClickMessage {});
                         load_state.save_name = Some(save_name_str.to_owned());
                         next_state.set(GameState::Loading);
                     }
@@ -397,6 +484,7 @@ pub fn load_game_menu_system(
 
             ui.add_space(10.0);
             if ui.button("Back").clicked() {
+                ui_click_message_writer.write(UiClickMessage {});
                 next_state.set(GameState::Menu);
             }
         });
@@ -464,6 +552,7 @@ fn turn_ui(
 
     if ui.button("End Turn").clicked() {
         // if resources.player_data.country_idx == resources.countries.countries.len() - 1 {
+        msgs.ui_click_message.write(UiClickMessage {});
         msgs.ai_turn.write(AiTurnMessage {});
         // resources.player_data.country_idx = 0;
         // } else {
@@ -477,6 +566,7 @@ fn turn_ui(
 fn army_ui(
     resources: &mut ControlsUiResources<'_>,
     msgw: &mut MessageWriter<'_, SpawnArmyMessage>,
+    ui_click_message_writer: &mut MessageWriter<'_, UiClickMessage>,
     army_at_pos: Option<(Entity, &Army)>,
     ui: &mut egui::Ui,
     idx: usize,
@@ -488,6 +578,7 @@ fn army_ui(
     ui.label(format!("Unit cost: {}", resources.map_settings.unit_cost));
 
     if ui.button("Recruit").clicked() {
+        ui_click_message_writer.write(UiClickMessage {});
         msgw.write(SpawnArmyMessage {
             tile_entity: selected_tile_entity,
             country_idx: idx,
@@ -495,11 +586,12 @@ fn army_ui(
         });
     }
 
-    if ui.button("Move").clicked()
-        && *resources.current_state != InGameStates::MovingArmy
+    if *resources.current_state != InGameStates::MovingArmy
         && army_at_pos.is_some()
         && let Some((entity, _)) = army_at_pos
+        && ui.button("Move").clicked()
     {
+        ui_click_message_writer.write(UiClickMessage {});
         ui_model.army_entity_being_moved = Some(entity);
         resources.next_state.set(InGameStates::MovingArmy);
     }
@@ -518,6 +610,7 @@ fn building_ui(
     ui.label(format!("Building cost: {building_cost}"));
 
     if ui.button("Build").clicked() {
+        msgs.ui_click_message.write(UiClickMessage {});
         msgs.build_building.write(BuildBuildingMessage {
             tile_entity: selected_tile_entity,
             country_idx: idx,
@@ -551,6 +644,7 @@ pub fn country_selection_system(
     mut contexts: EguiContexts,
     mut next_state: ResMut<NextState<GameState>>,
     mut player_data: ResMut<PlayerData>,
+    mut ui_click_message_writer: MessageWriter<UiClickMessage>,
     menu_icons: Res<MenuIcons>,
 ) -> anyhow::Result<()> {
     let texture_ids: Vec<_> = menu_icons
@@ -578,6 +672,7 @@ pub fn country_selection_system(
                         ))
                         .clicked()
                     {
+                        ui_click_message_writer.write(UiClickMessage {});
                         player_data.country_idx = i;
                         next_state.set(GameState::Generating);
                     }

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use anyhow::{Result, anyhow};
 use bevy::{ecs::system::SystemParam, prelude::*};
 use rand::{Rng, rng};
 
@@ -39,11 +40,15 @@ pub struct AiSystemParams<'w, 's> {
     armies: Query<'w, 's, (Entity, &'static Army, &'static GridPosition)>,
 }
 
-pub fn ai_system(mut params: AiSystemParams) {
+pub fn ai_system(mut params: AiSystemParams) -> Result<()> {
     if params.ai_msgr.read().count() == 0 {
-        return;
+        return Ok(());
     }
     let (ownership_map, country_owned_positions) = build_maps(&params.ownership_tiles);
+
+    let country_strengths =
+        calculate_country_strengths(&params.countries, &country_owned_positions, &params.armies);
+
     for (country_idx, country) in params.countries.countries.iter().enumerate() {
         if country_idx == params.player_data.country_idx {
             continue;
@@ -52,8 +57,10 @@ pub fn ai_system(mut params: AiSystemParams) {
             country_idx,
             &params.countries,
             &params.diplomacy,
+            &country_strengths,
+            &params.armies,
             &mut params.relation_msg,
-        );
+        )?;
         process_economy(
             country_idx,
             country,
@@ -62,7 +69,8 @@ pub fn ai_system(mut params: AiSystemParams) {
             &params.tile_grid,
             &params.map_tiles,
             &mut params.build_msg,
-        );
+            &ownership_map,
+        )?;
         process_recruitment(
             country_idx,
             country,
@@ -70,16 +78,19 @@ pub fn ai_system(mut params: AiSystemParams) {
             &country_owned_positions,
             &params.tile_grid,
             &mut params.spawn_msg,
-        );
+            &ownership_map,
+            &params.armies,
+        )?;
         process_army_movement(
             country_idx,
             &params.armies,
             &ownership_map,
             &params.diplomacy,
             &mut params.army_movements,
-        );
+        )?;
     }
     params.msgr.write(NextTurnMessage {});
+    Ok(())
 }
 
 type OwnershipMap = HashMap<(i32, i32), usize>;
@@ -103,13 +114,35 @@ fn build_maps(
     (ownership_map, country_owned_positions)
 }
 
+fn calculate_country_strengths(
+    countries: &Countries,
+    country_owned_positions: &CountryOwnedPositionsMap,
+    armies: &Query<(Entity, &Army, &GridPosition)>,
+) -> HashMap<usize, i32> {
+    let mut country_strengths = HashMap::new();
+    for (country_idx, _country) in countries.countries.iter().enumerate() {
+        let owned_tiles_count = country_owned_positions
+            .get(&country_idx)
+            .map_or(0, |p| p.len());
+        let army_strength: i32 = armies
+            .iter()
+            .filter(|(_, army, _)| army.country_idx == country_idx)
+            .map(|(_, army, _)| army.number_of_units)
+            .sum();
+        let strength = owned_tiles_count as i32 + army_strength * 3;
+        country_strengths.insert(country_idx, strength);
+    }
+    country_strengths
+}
+
 fn process_diplomacy(
     country_idx: usize,
     countries: &Countries,
     diplomacy: &Diplomacy,
+    country_strengths: &HashMap<usize, i32>,
+    armies: &Query<(Entity, &Army, &GridPosition)>,
     relation_msg: &mut MessageWriter<ChangeRelationMessage>,
-) {
-    let mut rng = rng();
+) -> Result<()> {
     for other_idx in 0..countries.countries.len() {
         if country_idx == other_idx {
             continue;
@@ -117,7 +150,21 @@ fn process_diplomacy(
 
         match diplomacy.get_relation(country_idx, other_idx) {
             RelationStatus::AtWar => {
-                if rng.random_bool(0.05) {
+                let my_army_strength: i32 = armies
+                    .iter()
+                    .filter(|(_, army, _)| army.country_idx == country_idx)
+                    .map(|(_, army, _)| army.number_of_units)
+                    .sum();
+                let other_army_strength: i32 = armies
+                    .iter()
+                    .filter(|(_, army, _)| army.country_idx == other_idx)
+                    .map(|(_, army, _)| army.number_of_units)
+                    .sum();
+
+                if my_army_strength > 0
+                    && my_army_strength < other_army_strength / 2
+                    && rng().random_bool(0.3)
+                {
                     relation_msg.write(ChangeRelationMessage {
                         country_a_idx: country_idx,
                         country_b_idx: other_idx,
@@ -126,7 +173,14 @@ fn process_diplomacy(
                 }
             }
             RelationStatus::Neutral => {
-                if rng.random_bool(0.01) {
+                let my_strength = country_strengths
+                    .get(&country_idx)
+                    .ok_or_else(|| anyhow!("Failed to get my strength"))?;
+                let other_strength = country_strengths
+                    .get(&other_idx)
+                    .ok_or_else(|| anyhow!("Failed to get other strength"))?;
+
+                if my_strength > other_strength && rng().random_bool(0.1) {
                     relation_msg.write(ChangeRelationMessage {
                         country_a_idx: country_idx,
                         country_b_idx: other_idx,
@@ -136,77 +190,132 @@ fn process_diplomacy(
             }
         }
     }
+    Ok(())
 }
 
 fn process_economy(
     country_idx: usize,
     country: &Country,
     map_settings: &MapSettings,
-    country_owned_positions: &HashMap<usize, Vec<(i32, i32)>>,
+    country_owned_positions: &CountryOwnedPositionsMap,
     tile_grid: &TileMapGrid,
     map_tiles: &Query<Has<Building>, With<MapTile>>,
     build_msg: &mut MessageWriter<BuildBuildingMessage>,
-) {
+    ownership_map: &OwnershipMap,
+) -> Result<()> {
     if country.money < map_settings.building_cost {
-        return;
+        return Ok(());
     }
 
     if let Some(positions) = country_owned_positions.get(&country_idx) {
         let candidates: Vec<Entity> = positions
             .iter()
+            .filter(|&pos| !is_border_tile(pos, country_idx, ownership_map))
             .filter_map(|&(x, y)| tile_grid.grid.get(&(x, y)).copied())
             .filter(|&e| map_tiles.get(e).is_ok_and(|has| !has))
             .collect();
 
         if !candidates.is_empty() && rng().random_bool(0.5) {
+            let tile_entity = candidates[rng().random_range(0..candidates.len())];
             build_msg.write(BuildBuildingMessage {
-                tile_entity: candidates[rng().random_range(0..candidates.len())],
+                tile_entity,
                 country_idx,
             });
         }
     }
+    Ok(())
+}
+
+fn choose_spawn_positions<'a>(
+    country_idx: usize,
+    positions: &'a Vec<(i32, i32)>,
+    ownership_map: &OwnershipMap,
+    armies: &Query<(Entity, &Army, &GridPosition)>,
+) -> Vec<&'a (i32, i32)> {
+    let border_positions: Vec<&(i32, i32)> = positions
+        .iter()
+        .filter(|&pos| is_border_tile(pos, country_idx, ownership_map))
+        .collect();
+
+    let border_armies_count = armies
+        .iter()
+        .filter(|(_, army, pos)| {
+            army.country_idx == country_idx
+                && is_border_tile(&(pos.x, pos.y), country_idx, ownership_map)
+        })
+        .count();
+
+    let border_army_threshold = (border_positions.len() / 5).max(1);
+
+    let mut potential_spawn_positions: Vec<&(i32, i32)> =
+        if border_armies_count < border_army_threshold {
+            border_positions
+        } else {
+            positions
+                .iter()
+                .filter(|p| !is_border_tile(p, country_idx, ownership_map))
+                .collect()
+        };
+
+    if potential_spawn_positions.is_empty() {
+        potential_spawn_positions = positions.iter().collect();
+    }
+    potential_spawn_positions
 }
 
 fn process_recruitment(
     country_idx: usize,
     country: &Country,
     map_settings: &MapSettings,
-    country_owned_positions: &HashMap<usize, Vec<(i32, i32)>>,
+    country_owned_positions: &CountryOwnedPositionsMap,
     tile_grid: &TileMapGrid,
     spawn_msg: &mut MessageWriter<SpawnArmyMessage>,
-) {
+    ownership_map: &OwnershipMap,
+    armies: &Query<(Entity, &Army, &GridPosition)>,
+) -> Result<()> {
     if country.money < map_settings.unit_cost * 5 {
-        return;
+        return Ok(());
     }
-    let mut rng = rng();
 
     if let Some(positions) = country_owned_positions.get(&country_idx) {
         if positions.is_empty() {
-            return;
+            return Ok(());
         }
-        let (x, y) = positions[rng.random_range(0..positions.len())];
 
-        if let Some(&tile_entity) = tile_grid.grid.get(&(x, y)) {
-            let amount = (country.money as f32 * 0.3 / map_settings.unit_cost as f32) as i32;
-            if amount > 0 {
-                spawn_msg.write(SpawnArmyMessage {
-                    tile_entity,
-                    country_idx,
-                    amount,
-                });
-            }
+        let potential_spawn_positions =
+            choose_spawn_positions(country_idx, positions, ownership_map, armies);
+
+        if potential_spawn_positions.is_empty() {
+            return Ok(());
+        }
+
+        let spawn_pos =
+            potential_spawn_positions[rng().random_range(0..potential_spawn_positions.len())];
+
+        let tile_entity = tile_grid
+            .grid
+            .get(spawn_pos)
+            .ok_or_else(|| anyhow!("Invalid spawn position selected"))?;
+
+        let amount = (country.money as f32 * 0.3 / map_settings.unit_cost as f32) as i32;
+        if amount > 0 {
+            spawn_msg.write(SpawnArmyMessage {
+                tile_entity: *tile_entity,
+                country_idx,
+                amount,
+            });
         }
     }
+    Ok(())
 }
 
 fn process_army_movement(
     country_idx: usize,
     armies: &Query<(Entity, &Army, &GridPosition)>,
-    ownership_map: &HashMap<(i32, i32), usize>,
+    ownership_map: &OwnershipMap,
     diplomacy: &Diplomacy,
     army_movements: &mut ResMut<ArmyMovements>,
-) {
-    let mut rng = rng();
+) -> Result<()> {
     for (entity, army, pos) in armies.iter() {
         if army.country_idx != country_idx {
             continue;
@@ -224,44 +333,125 @@ fn process_army_movement(
             .map(|&(nx, ny)| GridPosition::new(nx, ny))
             .collect();
 
-        if !valid_moves.is_empty() {
-            let target = select_target(&valid_moves, country_idx, ownership_map, &mut rng);
-            army_movements.add_movement(MoveArmyMessage {
-                moved_army_entity: entity,
-                target_position: target,
-                number_of_units_to_move: army.number_of_units,
-            });
+        if let Ok(target) = select_target(&valid_moves, army, ownership_map, armies) {
+            if target != *pos {
+                army_movements.add_movement(MoveArmyMessage {
+                    moved_army_entity: entity,
+                    target_position: target,
+                    number_of_units_to_move: army.number_of_units,
+                });
+            }
         }
     }
+    Ok(())
 }
 
 fn is_valid_move(
     nx: i32,
     ny: i32,
     country_idx: usize,
-    map: &HashMap<(i32, i32), usize>,
+    ownership_map: &OwnershipMap,
     dip: &Diplomacy,
 ) -> bool {
-    map.get(&(nx, ny)).is_some_and(|&owner| {
-        owner == country_idx
-            || matches!(dip.get_relation(country_idx, owner), RelationStatus::AtWar)
-    })
+    match ownership_map.get(&(nx, ny)) {
+        Some(&owner) => {
+            owner == country_idx
+                || matches!(dip.get_relation(country_idx, owner), RelationStatus::AtWar)
+        }
+        None => false, // Unowned tiles are water and not walkable
+    }
+}
+
+fn calculate_move_score(
+    target_pos: &GridPosition,
+    army: &Army,
+    ownership_map: &OwnershipMap,
+    armies: &Query<(Entity, &Army, &GridPosition)>,
+) -> i32 {
+    let mut score = 0;
+    let target_key = &(target_pos.x, target_pos.y);
+
+    let enemy_army_on_tile = armies.iter().find(|(_, other_army, other_pos)| {
+        other_pos.x == target_pos.x
+            && other_pos.y == target_pos.y
+            && other_army.country_idx != army.country_idx
+    });
+
+    if let Some((_, enemy_army, _)) = enemy_army_on_tile {
+        if army.number_of_units > enemy_army.number_of_units {
+            score += 1000;
+        } else if army.number_of_units > enemy_army.number_of_units / 2 {
+            score += 200;
+        } else {
+            score -= 1000;
+        }
+    }
+
+    if let Some(&owner) = ownership_map.get(target_key) {
+        if owner != army.country_idx {
+            score += 500;
+        } else {
+            score += 1;
+        }
+    }
+
+    score += count_friendly_neighbors(target_pos, army.country_idx, ownership_map) * 10;
+    score += rng().random_range(0..5);
+    score
 }
 
 fn select_target(
     moves: &[GridPosition],
-    idx: usize,
-    map: &HashMap<(i32, i32), usize>,
-    rng: &mut impl Rng,
-) -> GridPosition {
-    let enemies: Vec<&GridPosition> = moves
-        .iter()
-        .filter(|p| map.get(&(p.x, p.y)).is_some_and(|&o| o != idx))
-        .collect();
-
-    if !enemies.is_empty() {
-        *enemies[rng.random_range(0..enemies.len())]
-    } else {
-        moves[rng.random_range(0..moves.len())]
+    army: &Army,
+    ownership_map: &OwnershipMap,
+    armies: &Query<(Entity, &Army, &GridPosition)>,
+) -> Result<GridPosition> {
+    if moves.is_empty() {
+        return Err(anyhow!("No valid moves for army"));
     }
+
+    moves
+        .iter()
+        .max_by_key(|&target_pos| calculate_move_score(target_pos, army, ownership_map, armies))
+        .copied()
+        .ok_or_else(|| anyhow!("Could not determine best move"))
+}
+
+fn is_border_tile(pos: &(i32, i32), owner_idx: usize, ownership_map: &OwnershipMap) -> bool {
+    let neighbors = [
+        (pos.0 + 1, pos.1),
+        (pos.0 - 1, pos.1),
+        (pos.0, pos.1 + 1),
+        (pos.0, pos.1 - 1),
+    ];
+    for neighbor in &neighbors {
+        match ownership_map.get(neighbor) {
+            Some(&neighbor_owner) if neighbor_owner != owner_idx => return true,
+            None => return true, // Adjacent to water is also a border
+            _ => (),
+        }
+    }
+    false
+}
+
+fn count_friendly_neighbors(
+    pos: &GridPosition,
+    owner_idx: usize,
+    ownership_map: &OwnershipMap,
+) -> i32 {
+    let neighbors = [
+        (pos.x + 1, pos.y),
+        (pos.x - 1, pos.y),
+        (pos.x, pos.y + 1),
+        (pos.x, pos.y - 1),
+    ];
+    let mut count = 0;
+    for neighbor in &neighbors {
+        if let Some(&neighbor_owner) = ownership_map.get(neighbor) {
+            if neighbor_owner == owner_idx {
+                count += 1;
+            }
+        }
+    }
+    count
 }

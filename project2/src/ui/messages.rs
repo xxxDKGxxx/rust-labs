@@ -1,4 +1,7 @@
-use bevy::ecs::{message::MessageWriter, system::SystemParam};
+use bevy::ecs::{
+    message::{Message, MessageWriter},
+    system::SystemParam,
+};
 
 use crate::{
     ai::systems::AiTurnMessage,
@@ -14,4 +17,8 @@ pub struct UiGameMessages<'w> {
     pub spawn_army: MessageWriter<'w, SpawnArmyMessage>,
     pub change_relation: MessageWriter<'w, ChangeRelationMessage>,
     pub save_game: MessageWriter<'w, SaveGameMessage>,
+    pub ui_click_message: MessageWriter<'w, UiClickMessage>,
 }
+
+#[derive(Message)]
+pub struct UiClickMessage {}

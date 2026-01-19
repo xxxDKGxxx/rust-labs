@@ -15,9 +15,9 @@ pub struct Country {
 }
 
 impl Country {
-    pub fn new(name: String, color: Color) -> Self {
+    pub fn new(name: &str, color: Color) -> Self {
         Self {
-            name,
+            name: name.to_string(),
             color,
             money: 0,
         }

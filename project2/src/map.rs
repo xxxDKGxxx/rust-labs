@@ -19,7 +19,7 @@ pub struct MapPlugin {}
 
 impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(MapSettings::new(100, 50, 100, 10000, 100))
+        app.insert_resource(MapSettings::new(100, 50, 100, 2000, 100))
             .init_resource::<TileMapGrid>()
             .init_resource::<SelectionState>()
             .init_resource::<MapVisibilityState>()
