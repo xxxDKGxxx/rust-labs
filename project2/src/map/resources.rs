@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use bevy::{platform::collections::HashMap, prelude::*};
 use serde::{Deserialize, Serialize};
 
-use crate::map::messages::MoveArmyMessage;
+use crate::map::messages::{ArmyBattleMessage, MoveArmyMessage};
 
 #[derive(Resource, Serialize, Deserialize, Clone)]
 pub struct MapSettings {
@@ -73,25 +73,48 @@ pub enum MapVisibilityState {
     PoliticalOnly,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Clone)]
 pub struct ArmyMovements {
-    queue: VecDeque<MoveArmyMessage>,
+    pub movements: VecDeque<MoveArmyMessage>,
 }
 
 impl FromWorld for ArmyMovements {
     fn from_world(_: &mut World) -> Self {
         Self {
-            queue: VecDeque::new(),
+            movements: VecDeque::new(),
         }
     }
 }
 
 impl ArmyMovements {
     pub fn add_movement(&mut self, movement: MoveArmyMessage) {
-        self.queue.push_back(movement);
+        self.movements.push_back(movement);
     }
 
     pub fn get_movement(&mut self) -> Option<MoveArmyMessage> {
-        self.queue.pop_front()
+        self.movements.pop_front()
+    }
+}
+
+#[derive(Resource)]
+pub struct ArmyBattles {
+    pub battles: VecDeque<ArmyBattleMessage>,
+}
+
+impl FromWorld for ArmyBattles {
+    fn from_world(_: &mut World) -> Self {
+        Self {
+            battles: VecDeque::new(),
+        }
+    }
+}
+
+impl ArmyBattles {
+    pub fn add_battle(&mut self, battle: ArmyBattleMessage) {
+        self.battles.push_back(battle);
+    }
+
+    pub fn get_battle(&mut self) -> Option<ArmyBattleMessage> {
+        self.battles.pop_front()
     }
 }

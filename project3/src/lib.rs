@@ -3,13 +3,12 @@ use std::ptr;
 
 // A custom string type that manages its own memory.
 #[derive(Debug)]
-pub struct MyString {
+pub struct CustomString {
     ptr: *mut c_char,
     len: usize,
 }
 
-impl MyString {
-    // Creates a new MyString from a Rust string slice.
+impl CustomString {
     pub fn from_str(s: &str) -> Self {
         let len = s.len();
         // Allocate memory for the string plus a null terminator.
@@ -20,7 +19,7 @@ impl MyString {
             // For this project, we'll follow the no-panic rule.
             // Returning an empty string is a possible safe fallback.
             return Self {
-                ptr: ptr::null_mut(),   
+                ptr: ptr::null_mut(),
                 len: 0,
             };
         }
@@ -49,7 +48,7 @@ impl MyString {
     }
 }
 
-impl Drop for MyString {
+impl Drop for CustomString {
     fn drop(&mut self) {
         if !self.ptr.is_null() {
             unsafe {
@@ -59,7 +58,7 @@ impl Drop for MyString {
     }
 }
 
-impl Clone for MyString {
+impl Clone for CustomString {
     fn clone(&self) -> Self {
         if self.ptr.is_null() {
             return Self {
@@ -84,7 +83,7 @@ impl Clone for MyString {
     }
 }
 
-impl PartialEq for MyString {
+impl PartialEq for CustomString {
     fn eq(&self, other: &Self) -> bool {
         if self.len != other.len {
             return false;
@@ -96,14 +95,13 @@ impl PartialEq for MyString {
             return false;
         }
         unsafe {
-            // Compare the memory content.
             std::slice::from_raw_parts(self.ptr as *const u8, self.len)
                 == std::slice::from_raw_parts(other.ptr as *const u8, other.len)
         }
     }
 }
 
-impl Eq for MyString {}
+impl Eq for CustomString {}
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Color {
@@ -113,7 +111,7 @@ enum Color {
 
 struct Node {
     key: u64,
-    value: MyString,
+    value: CustomString,
     color: Color,
     parent: *mut Node,
     left: *mut Node,
@@ -121,8 +119,7 @@ struct Node {
 }
 
 impl Node {
-    // Creates a new heap-allocated Node.
-    fn new(key: u64, value: MyString) -> *mut Self {
+    fn new(key: u64, value: CustomString) -> *mut Self {
         unsafe {
             let layout = std::alloc::Layout::new::<Self>();
             let node_ptr = malloc(layout.size()) as *mut Self;
@@ -134,7 +131,7 @@ impl Node {
                 Self {
                     key,
                     value,
-                    color: Color::Red, // New nodes are always red
+                    color: Color::Red, // easiest to fix
                     parent: ptr::null_mut(),
                     left: ptr::null_mut(),
                     right: ptr::null_mut(),
@@ -145,18 +142,17 @@ impl Node {
     }
 }
 
-pub struct Dictionary {
+pub struct NumberStringDictionary {
     root: *mut Node,
 }
 
-impl Dictionary {
+impl NumberStringDictionary {
     pub fn new() -> Self {
         Self {
             root: ptr::null_mut(),
         }
     }
 
-    // Finds a node with the given key.
     fn find_node(&self, key: u64) -> *mut Node {
         let mut current = self.root;
         while !current.is_null() {
@@ -172,8 +168,7 @@ impl Dictionary {
         ptr::null_mut()
     }
 
-    // Returns a reference to the value corresponding to the key.
-    pub fn get(&self, key: u64) -> Option<&MyString> {
+    pub fn get(&self, key: u64) -> Option<&CustomString> {
         let node = self.find_node(key);
         if node.is_null() {
             None
@@ -182,22 +177,18 @@ impl Dictionary {
         }
     }
 
-    // Returns true if the dictionary contains a value for the specified key.
     pub fn contains_key(&self, key: u64) -> bool {
         !self.find_node(key).is_null()
     }
 
-    // Inserts a key-value pair into the dictionary.
-    pub fn insert(&mut self, key: u64, value: MyString) {
+    // 34
+    pub fn insert(&mut self, key: u64, value: CustomString) {
         let new_node = Node::new(key, value);
         if new_node.is_null() {
-            // Allocation failed, can't insert.
             return;
         }
-
         let mut y = ptr::null_mut();
         let mut x = self.root;
-
         while !x.is_null() {
             y = x;
             unsafe {
@@ -206,16 +197,14 @@ impl Dictionary {
                 } else if (*new_node).key > (*x).key {
                     x = (*x).right;
                 } else {
-                    // Key already exists, update value and clean up new node.
                     let new_value =
-                        std::mem::replace(&mut (*new_node).value, MyString::from_str(""));
+                        std::mem::replace(&mut (*new_node).value, CustomString::from_str(""));
                     (*x).value = new_value;
-                    drop_node(new_node);
+                    Self::drop_node(new_node);
                     return;
                 }
             }
         }
-
         unsafe {
             (*new_node).parent = y;
             if y.is_null() {
@@ -225,12 +214,10 @@ impl Dictionary {
             } else {
                 (*y).right = new_node;
             }
-
             self.insert_fixup(new_node);
         }
     }
 
-    // Restores the Red-Black Tree properties after insertion.
     unsafe fn insert_fixup(&mut self, mut z: *mut Node) {
         while !(*z).parent.is_null() && (*(*z).parent).color == Color::Red {
             let parent = (*z).parent;
@@ -252,7 +239,6 @@ impl Dictionary {
         }
     }
 
-    // Handles the left case for insert_fixup.
     unsafe fn insert_fixup_left_case(
         &mut self,
         mut z: *mut Node,
@@ -280,7 +266,6 @@ impl Dictionary {
         z
     }
 
-    // Handles the right case for insert_fixup.
     unsafe fn insert_fixup_right_case(
         &mut self,
         mut z: *mut Node,
@@ -308,7 +293,6 @@ impl Dictionary {
         z
     }
 
-    // Performs a left rotation on the given node.
     unsafe fn left_rotate(&mut self, x: *mut Node) {
         let y = (*x).right;
         (*x).right = (*y).left;
@@ -331,7 +315,6 @@ impl Dictionary {
         (*x).parent = y;
     }
 
-    // Performs a right rotation on the given node.
     unsafe fn right_rotate(&mut self, y: *mut Node) {
         let x = (*y).left;
         (*y).left = (*x).right;
@@ -354,19 +337,17 @@ impl Dictionary {
         (*y).parent = x;
     }
 
-    // Removes a key from the dictionary.
+    // 40
     pub fn remove(&mut self, key: u64) {
         let z = self.find_node(key);
         if z.is_null() {
             return; // Key not found
         }
-
         unsafe {
             let mut y = z;
             let mut _y_original_color = (*y).color;
             let x: *mut Node;
             let x_parent: *mut Node;
-
             if (*z).left.is_null() {
                 x = (*z).right;
                 x_parent = (*z).parent;
@@ -379,7 +360,6 @@ impl Dictionary {
                 y = self.minimum((*z).right);
                 _y_original_color = (*y).color;
                 x = (*y).right;
-
                 if (*y).parent == z {
                     x_parent = y;
                 } else {
@@ -388,22 +368,37 @@ impl Dictionary {
                     (*y).right = (*z).right;
                     (*(*y).right).parent = y;
                 }
-
                 self.transplant(z, y);
                 (*y).left = (*z).left;
                 (*(*y).left).parent = y;
                 (*y).color = (*z).color;
             }
-
             if _y_original_color == Color::Black {
                 self.remove_fixup(x, x_parent);
             }
-
-            free_node(z);
+            Self::free_node(z);
         }
     }
 
-    // Finds the minimum node in a subtree.
+    unsafe fn remove_two_children(&mut self, z: *mut Node) -> Color {
+        let y = self.minimum((*z).right);
+        let _y_original_color = (*y).color;
+        let x = (*y).right;
+        if (*y).parent == z {
+            x_parent = y;
+        } else {
+            x_parent = (*y).parent;
+            self.transplant(y, (*y).right);
+            (*y).right = (*z).right;
+            (*(*y).right).parent = y;
+        }
+        self.transplant(z, y);
+        (*y).left = (*z).left;
+        (*(*y).left).parent = y;
+        (*y).color = (*z).color;
+        _y_original_color
+    }
+
     unsafe fn minimum(&self, mut node: *mut Node) -> *mut Node {
         while !(*node).left.is_null() {
             node = (*node).left;
@@ -411,7 +406,6 @@ impl Dictionary {
         node
     }
 
-    // Replaces one subtree as a child of its parent with another subtree.
     unsafe fn transplant(&mut self, u: *mut Node, v: *mut Node) {
         if (*u).parent.is_null() {
             self.root = v;
@@ -425,7 +419,6 @@ impl Dictionary {
         }
     }
 
-    // Restores the Red-Black Tree properties after removal.
     unsafe fn remove_fixup(&mut self, mut x: *mut Node, mut parent: *mut Node) {
         while x != self.root && (x.is_null() || (*x).color == Color::Black) {
             if parent.is_null() {
@@ -447,7 +440,6 @@ impl Dictionary {
         }
     }
 
-    // Handles the left case for remove_fixup.
     unsafe fn remove_fixup_left_case(
         &mut self,
         mut x: *mut Node,
@@ -497,7 +489,6 @@ impl Dictionary {
         (x, parent)
     }
 
-    // Handles the right case for remove_fixup.
     unsafe fn remove_fixup_right_case(
         &mut self,
         mut x: *mut Node,
@@ -546,47 +537,42 @@ impl Dictionary {
         }
         (x, parent)
     }
+
+    unsafe fn drop_node(node_ptr: *mut Node) {
+        if node_ptr.is_null() {
+            return;
+        }
+        Self::drop_node((*node_ptr).left);
+        Self::drop_node((*node_ptr).right);
+
+        Self::free_node(node_ptr);
+    }
+
+    unsafe fn free_node(node_ptr: *mut Node) {
+        if node_ptr.is_null() {
+            return;
+        }
+
+        ptr::drop_in_place(&mut (*node_ptr).value);
+
+        free(node_ptr as *mut _);
+    }
 }
 
-impl Default for Dictionary {
+impl Default for NumberStringDictionary {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Drop for Dictionary {
+impl Drop for NumberStringDictionary {
     fn drop(&mut self) {
         if !self.root.is_null() {
-            // Start post-order traversal from the root to deallocate nodes.
             unsafe {
-                drop_node(self.root);
+                Self::drop_node(self.root);
             }
         }
     }
-}
-
-// Helper function for recursively dropping nodes in a subtree.
-unsafe fn drop_node(node_ptr: *mut Node) {
-    if node_ptr.is_null() {
-        return;
-    }
-    // Deallocate children first
-    drop_node((*node_ptr).left);
-    drop_node((*node_ptr).right);
-
-    free_node(node_ptr);
-}
-
-// Frees a single node.
-unsafe fn free_node(node_ptr: *mut Node) {
-    if node_ptr.is_null() {
-        return;
-    }
-    // Manually drop the MyString value before freeing the node memory
-    ptr::drop_in_place(&mut (*node_ptr).value);
-
-    // Deallocate the node itself using free
-    free(node_ptr as *mut _);
 }
 
 #[macro_export]
@@ -598,9 +584,9 @@ macro_rules! dict {
     // Main macro logic
     ($($key:expr => $value:expr),*) => {
         {
-            let mut temp_dict = Dictionary::new();
+            let mut temp_dict = NumberStringDictionary::new();
             $(
-                temp_dict.insert($key, MyString::from_str($value));
+                temp_dict.insert($key, CustomString::from_str($value));
             )*
             temp_dict
         }
@@ -608,25 +594,26 @@ macro_rules! dict {
 }
 
 pub mod ffi {
-    use super::{Dictionary, MyString};
+    use super::{CustomString, NumberStringDictionary};
     use libc::{c_char, free, malloc};
     use std::ffi::CStr;
     use std::ptr;
 
     #[no_mangle]
-    pub extern "C" fn dict_new() -> *mut Dictionary {
+    pub extern "C" fn dict_new() -> *mut NumberStringDictionary {
         unsafe {
-            let dict_ptr = malloc(std::mem::size_of::<Dictionary>()) as *mut Dictionary;
+            let dict_ptr = malloc(std::mem::size_of::<NumberStringDictionary>())
+                as *mut NumberStringDictionary;
             if dict_ptr.is_null() {
                 return ptr::null_mut();
             }
-            ptr::write(dict_ptr, Dictionary::new());
+            ptr::write(dict_ptr, NumberStringDictionary::new());
             dict_ptr
         }
     }
 
     #[no_mangle]
-    pub extern "C" fn dict_free(dict: *mut Dictionary) {
+    pub extern "C" fn dict_free(dict: *mut NumberStringDictionary) {
         if !dict.is_null() {
             unsafe {
                 ptr::drop_in_place(dict);
@@ -636,19 +623,23 @@ pub mod ffi {
     }
 
     #[no_mangle]
-    pub extern "C" fn dict_insert(dict: *mut Dictionary, key: u64, value: *const c_char) {
+    pub extern "C" fn dict_insert(
+        dict: *mut NumberStringDictionary,
+        key: u64,
+        value: *const c_char,
+    ) {
         if dict.is_null() || value.is_null() {
             return;
         }
         let dict = unsafe { &mut *dict };
         let c_str = unsafe { CStr::from_ptr(value) };
         if let Ok(rust_str) = c_str.to_str() {
-            dict.insert(key, MyString::from_str(rust_str));
+            dict.insert(key, CustomString::from_str(rust_str));
         }
     }
 
     #[no_mangle]
-    pub extern "C" fn dict_get(dict: *const Dictionary, key: u64) -> *const c_char {
+    pub extern "C" fn dict_get(dict: *const NumberStringDictionary, key: u64) -> *const c_char {
         if dict.is_null() {
             return ptr::null();
         }
@@ -660,7 +651,7 @@ pub mod ffi {
     }
 
     #[no_mangle]
-    pub extern "C" fn dict_contains_key(dict: *const Dictionary, key: u64) -> bool {
+    pub extern "C" fn dict_contains_key(dict: *const NumberStringDictionary, key: u64) -> bool {
         if dict.is_null() {
             return false;
         }
@@ -669,7 +660,7 @@ pub mod ffi {
     }
 
     #[no_mangle]
-    pub extern "C" fn dict_remove(dict: *mut Dictionary, key: u64) {
+    pub extern "C" fn dict_remove(dict: *mut NumberStringDictionary, key: u64) {
         if dict.is_null() {
             return;
         }
@@ -684,9 +675,9 @@ mod tests {
 
     #[test]
     fn test_mystring() {
-        let s1 = MyString::from_str("hello");
+        let s1 = CustomString::from_str("hello");
         let s2 = s1.clone();
-        let s3 = MyString::from_str("world");
+        let s3 = CustomString::from_str("world");
 
         assert_eq!(s1.len(), 5);
         assert_eq!(s2.len(), 5);
@@ -698,32 +689,32 @@ mod tests {
 
     #[test]
     fn test_dict_insert_and_get() {
-        let mut dict = Dictionary::new();
-        dict.insert(10, MyString::from_str("ten"));
-        dict.insert(20, MyString::from_str("twenty"));
-        dict.insert(5, MyString::from_str("five"));
+        let mut dict = NumberStringDictionary::new();
+        dict.insert(10, CustomString::from_str("ten"));
+        dict.insert(20, CustomString::from_str("twenty"));
+        dict.insert(5, CustomString::from_str("five"));
 
         assert!(dict.contains_key(10));
         assert!(dict.contains_key(20));
         assert!(dict.contains_key(5));
         assert!(!dict.contains_key(15));
 
-        assert_eq!(dict.get(10), Some(&MyString::from_str("ten")));
-        assert_eq!(dict.get(20), Some(&MyString::from_str("twenty")));
-        assert_eq!(dict.get(5), Some(&MyString::from_str("five")));
+        assert_eq!(dict.get(10), Some(&CustomString::from_str("ten")));
+        assert_eq!(dict.get(20), Some(&CustomString::from_str("twenty")));
+        assert_eq!(dict.get(5), Some(&CustomString::from_str("five")));
         assert_eq!(dict.get(15), None);
 
         // Test updating a key
-        dict.insert(10, MyString::from_str("ten-updated"));
-        assert_eq!(dict.get(10), Some(&MyString::from_str("ten-updated")));
+        dict.insert(10, CustomString::from_str("ten-updated"));
+        assert_eq!(dict.get(10), Some(&CustomString::from_str("ten-updated")));
     }
 
     #[test]
     fn test_dict_remove() {
-        let mut dict = Dictionary::new();
+        let mut dict = NumberStringDictionary::new();
         let keys = [10, 20, 5, 15, 25, 3, 8, 1, 4, 7, 9];
         for &key in &keys {
-            dict.insert(key, MyString::from_str(&key.to_string()));
+            dict.insert(key, CustomString::from_str(&key.to_string()));
         }
 
         // Remove a leaf node
@@ -757,7 +748,10 @@ mod tests {
         let remaining_keys = [20, 15, 25, 3, 4, 7, 9];
         for &key in &remaining_keys {
             assert!(dict.contains_key(key));
-            assert_eq!(dict.get(key), Some(&MyString::from_str(&key.to_string())));
+            assert_eq!(
+                dict.get(key),
+                Some(&CustomString::from_str(&key.to_string()))
+            );
         }
     }
 
@@ -774,8 +768,8 @@ mod tests {
         assert!(dict.contains_key(3));
         assert!(!dict.contains_key(4));
 
-        assert_eq!(dict.get(1), Some(&MyString::from_str("one")));
-        assert_eq!(dict.get(2), Some(&MyString::from_str("two")));
-        assert_eq!(dict.get(3), Some(&MyString::from_str("three")));
+        assert_eq!(dict.get(1), Some(&CustomString::from_str("one")));
+        assert_eq!(dict.get(2), Some(&CustomString::from_str("two")));
+        assert_eq!(dict.get(3), Some(&CustomString::from_str("three")));
     }
 }

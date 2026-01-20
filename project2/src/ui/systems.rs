@@ -28,6 +28,7 @@ use crate::common::components::GridPosition;
 use crate::common::messages::SaveGameMessage;
 use crate::common::systems::{SAVE_PATH, get_save_path};
 use crate::country::messages::ChangeRelationMessage;
+use crate::map::messages::ArmyBattleMessage;
 use crate::ui::messages::UiClickMessage;
 use crate::ui::resources::UiSounds;
 use crate::{
@@ -51,11 +52,13 @@ pub fn setup_audio(mut commands: Commands, asset_server: Res<AssetServer>) {
     let click_handle = asset_server.load("ui-click.mp3");
     let war_handle = asset_server.load("war_short.mp3");
     let peace_handle = asset_server.load("peace_short.mp3");
+    let battle_handle = asset_server.load("battle.mp3");
 
     commands.insert_resource(UiSounds {
         click_sound: click_handle,
         war_sound: war_handle,
         peace_sound: peace_handle,
+        battle_sound: battle_handle,
     });
 }
 
@@ -99,6 +102,19 @@ pub fn handle_change_relation_audio(
                 ));
             }
         }
+    }
+}
+
+pub fn handle_battle_audio(
+    mut commands: Commands,
+    mut army_battle_message_reader: MessageReader<ArmyBattleMessage>,
+    ui_sounds: Res<UiSounds>,
+) {
+    for _ in army_battle_message_reader.read() {
+        commands.spawn((
+            AudioPlayer(ui_sounds.battle_sound.clone()),
+            PlaybackSettings::DESPAWN,
+        ));
     }
 }
 
@@ -268,7 +284,7 @@ pub fn setup_ui(
             }
         }
 
-        turn_ui(&mut msgs, &mut resources, ui);
+        turn_ui(&mut msgs, &mut resources, ui, &ui_model);
 
         if ui.button("Save").clicked() {
             msgs.ui_click_message.write(UiClickMessage {});
@@ -395,6 +411,7 @@ fn main_menu_buttons(
     next_state: &mut ResMut<NextState<GameState>>,
     exit: &mut MessageWriter<AppExit>,
     sound: &mut MessageWriter<UiClickMessage>,
+    ui_model: &mut UiModel,
 ) {
     ui.heading("Project 2");
     ui.add_space(10.0);
@@ -419,10 +436,7 @@ fn main_menu_buttons(
 
     ui.add_space(5.0);
 
-    if ui.button("Options").clicked() {
-        sound.write(UiClickMessage {});
-        println!("Tu byłyby opcje...");
-    }
+    ui.checkbox(&mut ui_model.ai_on, "AI on?");
 
     ui.add_space(5.0);
 
@@ -437,6 +451,7 @@ pub fn main_menu_system(
     mut next_state: ResMut<NextState<GameState>>,
     mut exit: MessageWriter<AppExit>,
     mut sound: MessageWriter<UiClickMessage>,
+    mut ui_model: ResMut<UiModel>,
 ) -> anyhow::Result<()> {
     let ctx = contexts.ctx_mut()?;
 
@@ -445,7 +460,7 @@ pub fn main_menu_system(
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
-            main_menu_buttons(ui, &mut next_state, &mut exit, &mut sound);
+            main_menu_buttons(ui, &mut next_state, &mut exit, &mut sound, &mut ui_model);
         });
 
     Ok(())
@@ -543,6 +558,7 @@ fn turn_ui(
     msgs: &mut UiGameMessages<'_>,
     resources: &mut ControlsUiResources<'_>,
     ui: &mut egui::Ui,
+    ui_model: &UiModel,
 ) {
     ui.heading("Turn information");
 
@@ -551,13 +567,18 @@ fn turn_ui(
     ui.label(format!("Turn number: {turn_number}"));
 
     if ui.button("End Turn").clicked() {
-        // if resources.player_data.country_idx == resources.countries.countries.len() - 1 {
+        println!("End turn click");
         msgs.ui_click_message.write(UiClickMessage {});
-        msgs.ai_turn.write(AiTurnMessage {});
-        // resources.player_data.country_idx = 0;
-        // } else {
-        // resources.player_data.country_idx += 1;
-        // }
+        if !ui_model.ai_on {
+            if resources.player_data.country_idx == resources.countries.countries.len() - 1 {
+                msgs.next_turn_message.write(NextTurnMessage {});
+                resources.player_data.country_idx = 0;
+            } else {
+                resources.player_data.country_idx += 1;
+            }
+        } else {
+            msgs.ai_turn.write(AiTurnMessage {});
+        }
     }
 
     ui.separator();

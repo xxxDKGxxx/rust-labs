@@ -5,6 +5,7 @@ use bevy::{
     ecs::system::SystemParam, platform::collections::HashMap, prelude::*, window::PrimaryWindow,
 };
 use bevy_egui::EguiContexts;
+use itertools::Itertools;
 use noise::NoiseFn;
 use rand::random;
 use serde::{Deserialize, Serialize};
@@ -21,7 +22,7 @@ use crate::{
     },
     map::{
         components::*,
-        messages::{BuildBuildingMessage, MoveArmyMessage, SpawnArmyMessage},
+        messages::{ArmyBattleMessage, BuildBuildingMessage, MoveArmyMessage, SpawnArmyMessage},
         resources::*,
     },
     ui::resources::GameLoadState,
@@ -536,6 +537,102 @@ pub struct MoveArmySystemQueries<'w, 's> {
         Query<'w, 's, (&'static OwnershipTile, &'static GridPosition), Without<Army>>,
 }
 
+pub fn detect_army_collisions_system(
+    mut army_battles: ResMut<ArmyBattles>,
+    mut army_movements: ResMut<ArmyMovements>,
+    army_pos_query: Query<(Entity, &GridPosition, &Army)>,
+) {
+    if !army_movements.is_changed() {
+        return;
+    }
+
+    let army_movements_cloned = army_movements.clone();
+
+    let movements_with_source_positions: Vec<_> = army_movements_cloned
+        .movements
+        .iter()
+        .filter_map(|movement| {
+            let Some((_, source_pos, army)) = army_pos_query
+                .iter()
+                .find(|(entity, _, _)| *entity == movement.moved_army_entity)
+            else {
+                return None;
+            };
+
+            Some((movement, source_pos, army.country_idx))
+        })
+        .collect();
+
+    let collided_armies: Vec<_> = movements_with_source_positions
+        .iter()
+        .tuple_combinations()
+        .filter_map(|(first_movement, second_movement)| {
+            if first_movement.0.target_position == *second_movement.1
+                && *first_movement.1 == second_movement.0.target_position // moving at each other positions
+                && first_movement.2 != second_movement.2
+            // different countries
+            {
+                return Some((first_movement.0, second_movement.0));
+            }
+
+            None
+        })
+        .collect();
+
+    for (first_army_movement, second_army_movement) in collided_armies {
+        println!("Found collision");
+
+        army_movements
+            .movements
+            .retain(|v| v != first_army_movement && v != second_army_movement);
+
+        army_battles.add_battle(ArmyBattleMessage {
+            army_a_entity: first_army_movement.moved_army_entity,
+            army_b_entity: second_army_movement.moved_army_entity,
+        });
+    }
+}
+
+pub fn resolve_army_battle_system(
+    mut commands: Commands,
+    mut next_turn_msgr: MessageReader<NextTurnMessage>,
+    mut army_query: Query<&mut Army>,
+    mut battles: ResMut<ArmyBattles>,
+    mut army_battle_message_writer: MessageWriter<ArmyBattleMessage>,
+) {
+    for _ in next_turn_msgr.read() {
+        while let Some(msg) = battles.get_battle() {
+            let Ok([mut army_a, mut army_b]) =
+                army_query.get_many_mut([msg.army_a_entity, msg.army_b_entity])
+            else {
+                continue;
+            };
+
+            army_battle(&mut commands, &mut army_a, &mut army_b, msg.clone());
+            army_battle_message_writer.write(msg);
+        }
+    }
+}
+
+fn army_battle(
+    commands: &mut Commands<'_, '_>,
+    army_a: &mut Mut<'_, Army>,
+    army_b: &mut Mut<'_, Army>,
+    msg: ArmyBattleMessage,
+) {
+    let damage = min(army_a.number_of_units, army_b.number_of_units);
+
+    army_a.number_of_units -= damage;
+    army_b.number_of_units -= damage;
+
+    if army_a.number_of_units <= 0 {
+        commands.entity(msg.army_a_entity).despawn();
+    }
+    if army_b.number_of_units <= 0 {
+        commands.entity(msg.army_b_entity).despawn();
+    }
+}
+
 pub fn move_army_system(
     mut commands: Commands,
     mut next_turn_msgr: MessageReader<NextTurnMessage>,
@@ -561,6 +658,7 @@ pub fn move_army_system(
             )?;
         }
     }
+    println!("Move army system cleared movements");
 
     Ok(())
 }
@@ -857,8 +955,6 @@ fn resolve_armies_on_tile(
     armies: Vec<(Entity, usize, i32)>,
 ) {
     let mut armies_by_country: HashMap<usize, (Entity, i32)> = HashMap::new();
-
-    // 1. Merge same-country armies
     for (entity, country_idx, units) in armies {
         if let Some((_existing_entity, existing_units)) = armies_by_country.get_mut(&country_idx) {
             *existing_units += units;
@@ -867,28 +963,30 @@ fn resolve_armies_on_tile(
             armies_by_country.insert(country_idx, (entity, units));
         }
     }
-
-    // 2. Apply merges to component
     for (_, (entity, units)) in &armies_by_country {
         if let Ok((_, _, _, mut army)) = army_query.get_mut(*entity) {
             army.number_of_units = *units;
         }
     }
-
-    // 3. Resolve different-country conflicts (Keep strongest)
     if armies_by_country.len() > 1 {
-        let mut leaders: Vec<(Entity, i32)> = armies_by_country.values().cloned().collect();
-        leaders.sort_by_key(|(_, units)| -*units); // Descending
-
-        let (winner_entity, _) = leaders[0];
-
-        for (entity, _) in leaders.iter().skip(1) {
-            commands.entity(*entity).despawn();
-        }
-
-        println!(
-            "Resolved multi-country stacking. Winner: {:?}",
-            winner_entity
-        );
+        armies_by_country
+            .values()
+            .tuple_combinations()
+            .for_each(|(army_entity1, army_entity2)| {
+                let Ok(mut armies) = army_query.get_many_mut([army_entity1.0, army_entity2.0])
+                else {
+                    return;
+                };
+                let (army1, army2) = armies.split_at_mut(1);
+                army_battle(
+                    commands,
+                    &mut army1[0].3,
+                    &mut army2[0].3,
+                    ArmyBattleMessage {
+                        army_a_entity: army1[0].0,
+                        army_b_entity: army2[0].0,
+                    },
+                );
+            });
     }
 }

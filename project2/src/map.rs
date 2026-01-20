@@ -5,7 +5,7 @@ use crate::{
     common::{GenerateSet, LoadSet},
     log_error,
     map::{
-        messages::{BuildBuildingMessage, SpawnArmyMessage},
+        messages::{ArmyBattleMessage, BuildBuildingMessage, SpawnArmyMessage},
         resources::*,
         systems::*,
     },
@@ -24,6 +24,7 @@ impl Plugin for MapPlugin {
             .init_resource::<SelectionState>()
             .init_resource::<MapVisibilityState>()
             .init_resource::<ArmyMovements>()
+            .init_resource::<ArmyBattles>()
             .add_systems(
                 OnEnter(GameState::Generating),
                 setup_map.in_set(GenerateSet::Generate),
@@ -56,13 +57,18 @@ impl Plugin for MapPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    move_army_system.pipe(log_error),
+                    detect_army_collisions_system,
+                    resolve_army_battle_system,
+                    move_army_system
+                        .pipe(log_error)
+                        .after(detect_army_collisions_system),
                     save_map_system.pipe(log_error),
                     sync_army_colors_system,
                 )
                     .run_if(in_state(GameState::InGame)),
             )
             .add_message::<BuildBuildingMessage>()
-            .add_message::<SpawnArmyMessage>();
+            .add_message::<SpawnArmyMessage>()
+            .add_message::<ArmyBattleMessage>();
     }
 }

@@ -57,6 +57,7 @@ impl Plugin for UiPlugin {
                 (
                     handle_audio,
                     handle_change_relation_audio,
+                    handle_battle_audio,
                     update_turn_counter.run_if(in_state(GameState::InGame)),
                 ),
             )

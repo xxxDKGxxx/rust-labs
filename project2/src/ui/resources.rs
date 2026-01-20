@@ -30,6 +30,7 @@ pub struct UiSounds {
     pub click_sound: Handle<AudioSource>,
     pub war_sound: Handle<AudioSource>,
     pub peace_sound: Handle<AudioSource>,
+    pub battle_sound: Handle<AudioSource>,
 }
 
 #[derive(Resource)]
@@ -38,6 +39,7 @@ pub struct UiModel {
     pub army_entity_being_moved: Option<Entity>,
     pub save_popup_open: bool,
     pub save_file_name: String,
+    pub ai_on: bool,
 }
 
 impl FromWorld for UiModel {
@@ -47,6 +49,7 @@ impl FromWorld for UiModel {
             army_entity_being_moved: None,
             save_popup_open: false,
             save_file_name: "".into(),
+            ai_on: true,
         }
     }
 }

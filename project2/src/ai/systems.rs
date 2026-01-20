@@ -90,6 +90,7 @@ pub fn ai_system(mut params: AiSystemParams) -> Result<()> {
         )?;
     }
     params.msgr.write(NextTurnMessage {});
+    println!("Ai system is finished");
     Ok(())
 }
 

@@ -15,9 +15,15 @@ pub struct SpawnArmyMessage {
     pub amount: i32,
 }
 
-#[derive(Message, Debug)]
+#[derive(Message, Debug, Clone, PartialEq, Eq)]
 pub struct MoveArmyMessage {
     pub moved_army_entity: Entity,
     pub target_position: GridPosition,
     pub number_of_units_to_move: i32,
+}
+
+#[derive(Message, Clone)]
+pub struct ArmyBattleMessage {
+    pub army_a_entity: Entity,
+    pub army_b_entity: Entity,
 }
