@@ -545,24 +545,17 @@ pub fn detect_army_collisions_system(
     if !army_movements.is_changed() {
         return;
     }
-
     let army_movements_cloned = army_movements.clone();
-
     let movements_with_source_positions: Vec<_> = army_movements_cloned
         .movements
         .iter()
         .filter_map(|movement| {
-            let Some((_, source_pos, army)) = army_pos_query
+            let (_, source_pos, army) = army_pos_query
                 .iter()
-                .find(|(entity, _, _)| *entity == movement.moved_army_entity)
-            else {
-                return None;
-            };
-
+                .find(|(entity, _, _)| *entity == movement.moved_army_entity)?;
             Some((movement, source_pos, army.country_idx))
         })
         .collect();
-
     let collided_armies: Vec<_> = movements_with_source_positions
         .iter()
         .tuple_combinations()
@@ -574,18 +567,13 @@ pub fn detect_army_collisions_system(
             {
                 return Some((first_movement.0, second_movement.0));
             }
-
             None
         })
         .collect();
-
     for (first_army_movement, second_army_movement) in collided_armies {
-        println!("Found collision");
-
         army_movements
             .movements
             .retain(|v| v != first_army_movement && v != second_army_movement);
-
         army_battles.add_battle(ArmyBattleMessage {
             army_a_entity: first_army_movement.moved_army_entity,
             army_b_entity: second_army_movement.moved_army_entity,

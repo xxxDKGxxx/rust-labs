@@ -62,8 +62,7 @@ pub fn ai_system(mut params: AiSystemParams) -> Result<()> {
             &mut params.relation_msg,
         )?;
         process_economy(
-            country_idx,
-            country,
+            (country, country_idx),
             &params.map_settings,
             &country_owned_positions,
             &params.tile_grid,
@@ -72,8 +71,7 @@ pub fn ai_system(mut params: AiSystemParams) -> Result<()> {
             &ownership_map,
         )?;
         process_recruitment(
-            country_idx,
-            country,
+            (country, country_idx),
             &params.map_settings,
             &country_owned_positions,
             &params.tile_grid,
@@ -195,8 +193,7 @@ fn process_diplomacy(
 }
 
 fn process_economy(
-    country_idx: usize,
-    country: &Country,
+    country_with_idx: (&Country, usize),
     map_settings: &MapSettings,
     country_owned_positions: &CountryOwnedPositionsMap,
     tile_grid: &TileMapGrid,
@@ -204,6 +201,7 @@ fn process_economy(
     build_msg: &mut MessageWriter<BuildBuildingMessage>,
     ownership_map: &OwnershipMap,
 ) -> Result<()> {
+    let (country, country_idx) = country_with_idx;
     if country.money < map_settings.building_cost {
         return Ok(());
     }
@@ -229,7 +227,7 @@ fn process_economy(
 
 fn choose_spawn_positions<'a>(
     country_idx: usize,
-    positions: &'a Vec<(i32, i32)>,
+    positions: &'a [(i32, i32)],
     ownership_map: &OwnershipMap,
     armies: &Query<(Entity, &Army, &GridPosition)>,
 ) -> Vec<&'a (i32, i32)> {
@@ -237,7 +235,6 @@ fn choose_spawn_positions<'a>(
         .iter()
         .filter(|&pos| is_border_tile(pos, country_idx, ownership_map))
         .collect();
-
     let border_armies_count = armies
         .iter()
         .filter(|(_, army, pos)| {
@@ -245,9 +242,7 @@ fn choose_spawn_positions<'a>(
                 && is_border_tile(&(pos.x, pos.y), country_idx, ownership_map)
         })
         .count();
-
     let border_army_threshold = (border_positions.len() / 5).max(1);
-
     let mut potential_spawn_positions: Vec<&(i32, i32)> =
         if border_armies_count < border_army_threshold {
             border_positions
@@ -257,7 +252,6 @@ fn choose_spawn_positions<'a>(
                 .filter(|p| !is_border_tile(p, country_idx, ownership_map))
                 .collect()
         };
-
     if potential_spawn_positions.is_empty() {
         potential_spawn_positions = positions.iter().collect();
     }
@@ -265,8 +259,7 @@ fn choose_spawn_positions<'a>(
 }
 
 fn process_recruitment(
-    country_idx: usize,
-    country: &Country,
+    country_with_idx: (&Country, usize),
     map_settings: &MapSettings,
     country_owned_positions: &CountryOwnedPositionsMap,
     tile_grid: &TileMapGrid,
@@ -274,30 +267,25 @@ fn process_recruitment(
     ownership_map: &OwnershipMap,
     armies: &Query<(Entity, &Army, &GridPosition)>,
 ) -> Result<()> {
+    let (country, country_idx) = country_with_idx;
     if country.money < map_settings.unit_cost * 5 {
         return Ok(());
     }
-
     if let Some(positions) = country_owned_positions.get(&country_idx) {
         if positions.is_empty() {
             return Ok(());
         }
-
         let potential_spawn_positions =
             choose_spawn_positions(country_idx, positions, ownership_map, armies);
-
         if potential_spawn_positions.is_empty() {
             return Ok(());
         }
-
         let spawn_pos =
             potential_spawn_positions[rng().random_range(0..potential_spawn_positions.len())];
-
         let tile_entity = tile_grid
             .grid
             .get(spawn_pos)
             .ok_or_else(|| anyhow!("Invalid spawn position selected"))?;
-
         let amount = (country.money as f32 * 0.3 / map_settings.unit_cost as f32) as i32;
         if amount > 0 {
             spawn_msg.write(SpawnArmyMessage {
@@ -334,14 +322,14 @@ fn process_army_movement(
             .map(|&(nx, ny)| GridPosition::new(nx, ny))
             .collect();
 
-        if let Ok(target) = select_target(&valid_moves, army, ownership_map, armies) {
-            if target != *pos {
-                army_movements.add_movement(MoveArmyMessage {
-                    moved_army_entity: entity,
-                    target_position: target,
-                    number_of_units_to_move: army.number_of_units,
-                });
-            }
+        if let Ok(target) = select_target(&valid_moves, army, ownership_map, armies)
+            && target != *pos
+        {
+            army_movements.add_movement(MoveArmyMessage {
+                moved_army_entity: entity,
+                target_position: target,
+                number_of_units_to_move: army.number_of_units,
+            });
         }
     }
     Ok(())
@@ -448,10 +436,10 @@ fn count_friendly_neighbors(
     ];
     let mut count = 0;
     for neighbor in &neighbors {
-        if let Some(&neighbor_owner) = ownership_map.get(neighbor) {
-            if neighbor_owner == owner_idx {
-                count += 1;
-            }
+        if let Some(&neighbor_owner) = ownership_map.get(neighbor)
+            && neighbor_owner == owner_idx
+        {
+            count += 1;
         }
     }
     count

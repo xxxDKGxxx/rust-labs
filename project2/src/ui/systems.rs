@@ -247,7 +247,6 @@ pub fn setup_ui(
 ) -> Result<()> {
     let ctx = contexts.ctx_mut()?;
     let building_cost = resources.map_settings.building_cost;
-
     Window::new("Managing Centre").show(ctx, |ui| -> Result<()> {
         if let Some((country, idx)) = get_country_from_selection_state(
             &resources.selection_state,
@@ -257,22 +256,17 @@ pub fn setup_ui(
             get_selected_tile_from_selection_state(&resources.selection_state)
         {
             country_ui(ui, country);
-
             let (_, has_building) = map_tiles.get(selected_tile_entity)?;
-
             let army_at_pos = army_query
                 .iter()
                 .find(|(_, _, pos)| pos.x == selected_tile_pos.0 && pos.y == selected_tile_pos.1);
-
             if resources.player_data.country_idx == idx {
                 if !has_building {
                     building_ui(&mut msgs, building_cost, ui, idx, selected_tile_entity);
                 }
-
                 army_ui(
                     &mut resources,
-                    &mut msgs.spawn_army,
-                    &mut msgs.ui_click_message,
+                    &mut msgs,
                     army_at_pos.map(|(e, a, _)| (e, a)),
                     ui,
                     idx,
@@ -283,20 +277,19 @@ pub fn setup_ui(
                 diplomacy_ui(&mut msgs, &resources, ui, idx);
             }
         }
-
         turn_ui(&mut msgs, &mut resources, ui, &ui_model);
-
-        if ui.button("Save").clicked() {
-            msgs.ui_click_message.write(UiClickMessage {});
-            ui_model.save_popup_open = true;
-        }
-
+        save_ui(&mut msgs, &mut ui_model, ui);
         save_popup_ui(ctx, &mut ui_model, &mut msgs);
-
         Ok(())
     });
-
     Ok(())
+}
+
+fn save_ui(msgs: &mut UiGameMessages<'_>, ui_model: &mut ResMut<'_, UiModel>, ui: &mut egui::Ui) {
+    if ui.button("Save").clicked() {
+        msgs.ui_click_message.write(UiClickMessage {});
+        ui_model.save_popup_open = true;
+    }
 }
 
 const SAVE_FILE_NAME: &str = "save_turn.json";
@@ -586,8 +579,7 @@ fn turn_ui(
 
 fn army_ui(
     resources: &mut ControlsUiResources<'_>,
-    msgw: &mut MessageWriter<'_, SpawnArmyMessage>,
-    ui_click_message_writer: &mut MessageWriter<'_, UiClickMessage>,
+    ui_game_messages: &mut UiGameMessages,
     army_at_pos: Option<(Entity, &Army)>,
     ui: &mut egui::Ui,
     idx: usize,
@@ -599,8 +591,8 @@ fn army_ui(
     ui.label(format!("Unit cost: {}", resources.map_settings.unit_cost));
 
     if ui.button("Recruit").clicked() {
-        ui_click_message_writer.write(UiClickMessage {});
-        msgw.write(SpawnArmyMessage {
+        ui_game_messages.ui_click_message.write(UiClickMessage {});
+        ui_game_messages.spawn_army.write(SpawnArmyMessage {
             tile_entity: selected_tile_entity,
             country_idx: idx,
             amount: ui_model.selected_number_of_units,
@@ -612,7 +604,7 @@ fn army_ui(
         && let Some((entity, _)) = army_at_pos
         && ui.button("Move").clicked()
     {
-        ui_click_message_writer.write(UiClickMessage {});
+        ui_game_messages.ui_click_message.write(UiClickMessage {});
         ui_model.army_entity_being_moved = Some(entity);
         resources.next_state.set(InGameStates::MovingArmy);
     }
