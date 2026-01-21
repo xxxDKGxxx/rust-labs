@@ -335,23 +335,18 @@ pub fn save_map_system(
     for save_game_message in save_game_message_reader.read() {
         let mut armies: Vec<(Army, GridPosition)> = Vec::new();
         let mut map_tiles: Vec<(MapTile, GridPosition, bool)> = Vec::new();
-
         for (army, position) in armies_query.iter() {
             armies.push((army.clone(), *position));
         }
-
         for (map_tile, position, has_building) in map_tiles_query.iter() {
             map_tiles.push(((*map_tile).clone(), *position, has_building));
         }
-
         let map_save_state = MapSaveState {
             map_tiles,
             armies,
             map_settings: map_settings.clone(),
         };
-
         let save_json = serde_json::to_string_pretty(&map_save_state)?;
-
         std::fs::create_dir_all(format!("{}/{}", SAVE_PATH, save_game_message.save_name))?;
         std::fs::write(
             format!(
@@ -361,7 +356,6 @@ pub fn save_map_system(
             save_json,
         )?;
     }
-
     Ok(())
 }
 
@@ -596,8 +590,13 @@ pub fn resolve_army_battle_system(
                 continue;
             };
 
-            army_battle(&mut commands, &mut army_a, &mut army_b, msg.clone());
-            army_battle_message_writer.write(msg);
+            army_battle(
+                &mut commands,
+                &mut army_a,
+                &mut army_b,
+                msg.clone(),
+                &mut army_battle_message_writer,
+            );
         }
     }
 }
@@ -607,18 +606,18 @@ fn army_battle(
     army_a: &mut Mut<'_, Army>,
     army_b: &mut Mut<'_, Army>,
     msg: ArmyBattleMessage,
+    army_battle_message_writer: &mut MessageWriter<ArmyBattleMessage>,
 ) {
     let damage = min(army_a.number_of_units, army_b.number_of_units);
-
     army_a.number_of_units -= damage;
     army_b.number_of_units -= damage;
-
     if army_a.number_of_units <= 0 {
         commands.entity(msg.army_a_entity).despawn();
     }
     if army_b.number_of_units <= 0 {
         commands.entity(msg.army_b_entity).despawn();
     }
+    army_battle_message_writer.write(msg);
 }
 
 pub fn move_army_system(
@@ -917,6 +916,7 @@ pub fn army_position_sync_system(
     mut commands: Commands,
     mut army_query: Query<(Entity, &GridPosition, &mut Transform, &mut Army)>,
     map_settings: Res<MapSettings>,
+    mut army_battle_message_writer: MessageWriter<ArmyBattleMessage>,
 ) {
     let mut armies_by_pos: HashMap<GridPosition, Vec<(Entity, usize, i32)>> = HashMap::new();
 
@@ -932,7 +932,12 @@ pub fn army_position_sync_system(
 
     for (_, armies) in armies_by_pos {
         if armies.len() > 1 {
-            resolve_armies_on_tile(&mut commands, &mut army_query, armies);
+            resolve_armies_on_tile(
+                &mut commands,
+                &mut army_query,
+                armies,
+                &mut army_battle_message_writer,
+            );
         }
     }
 }
@@ -941,6 +946,7 @@ fn resolve_armies_on_tile(
     commands: &mut Commands,
     army_query: &mut Query<(Entity, &GridPosition, &mut Transform, &mut Army)>,
     armies: Vec<(Entity, usize, i32)>,
+    army_battle_message_writer: &mut MessageWriter<ArmyBattleMessage>,
 ) {
     let mut armies_by_country: HashMap<usize, (Entity, i32)> = HashMap::new();
     for (entity, country_idx, units) in armies {
@@ -974,6 +980,7 @@ fn resolve_armies_on_tile(
                         army_a_entity: army1[0].0,
                         army_b_entity: army2[0].0,
                     },
+                    army_battle_message_writer,
                 );
             });
     }

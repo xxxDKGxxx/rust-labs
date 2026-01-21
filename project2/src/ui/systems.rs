@@ -571,7 +571,7 @@ fn turn_ui(
                 resources.player_data.country_idx += 1;
             }
         } else {
-            msgs.ai_turn.write(AiTurnMessage {});
+            resources.next_state.set(InGameStates::AiTurn);
         }
     }
 

@@ -5,6 +5,8 @@ use bevy::{ecs::system::SystemParam, prelude::*};
 use rand::{Rng, rng};
 
 use crate::{
+    InGameStates,
+    ai::resources::AiProcessing,
     common::{components::GridPosition, messages::NextTurnMessage},
     country::{
         components::OwnershipTile,
@@ -33,7 +35,9 @@ pub struct AiSystemParams<'w, 's> {
     diplomacy: Res<'w, Diplomacy>,
     map_settings: Res<'w, MapSettings>,
     tile_grid: Res<'w, TileMapGrid>,
+    ai_processing: ResMut<'w, AiProcessing>,
     army_movements: ResMut<'w, ArmyMovements>,
+    next_state: ResMut<'w, NextState<InGameStates>>,
     build_msg: MessageWriter<'w, BuildBuildingMessage>,
     spawn_msg: MessageWriter<'w, SpawnArmyMessage>,
     relation_msg: MessageWriter<'w, ChangeRelationMessage>,
@@ -47,14 +51,9 @@ pub struct AiSystemParams<'w, 's> {
 }
 
 pub fn ai_system(mut params: AiSystemParams) -> Result<()> {
-    if params.ai_msgr.read().count() == 0 {
-        return Ok(());
-    }
     let (ownership_map, country_owned_positions) = build_maps(&params.ownership_tiles);
-
     let country_strengths =
         calculate_country_strengths(&params.countries, &country_owned_positions, &params.armies);
-
     ai_evaluate_peace_offers(
         &params.player_data,
         &params.peace_offers,
@@ -63,48 +62,54 @@ pub fn ai_system(mut params: AiSystemParams) -> Result<()> {
         &mut params.accept_peace_msg,
         &mut params.reject_peace_msg,
     );
-
-    for (country_idx, country) in params.countries.countries.iter().enumerate() {
-        if country_idx == params.player_data.country_idx {
-            continue;
-        }
-        process_diplomacy(
-            country_idx,
-            &params.countries,
-            &params.diplomacy,
-            &country_strengths,
-            &params.armies,
-            &mut params.relation_msg,
-            &mut params.propose_peace_msg,
-        )?;
-        process_economy(
-            (country, country_idx),
-            &params.map_settings,
-            &country_owned_positions,
-            &params.tile_grid,
-            &params.map_tiles,
-            &mut params.build_msg,
-            &ownership_map,
-        )?;
-        process_recruitment(
-            (country, country_idx),
-            &params.map_settings,
-            &country_owned_positions,
-            &params.tile_grid,
-            &mut params.spawn_msg,
-            &ownership_map,
-            &params.armies,
-        )?;
-        process_army_movement(
-            country_idx,
-            &params.armies,
-            &ownership_map,
-            &params.diplomacy,
-            &mut params.army_movements,
-        )?;
+    let current_country_idx = params.ai_processing.country_idx;
+    if current_country_idx >= params.countries.countries.len() {
+        params.next_state.set(InGameStates::Idle);
+        params.ai_processing.country_idx = 0;
+        params.msgr.write(NextTurnMessage {});
+        println!("Ai system is finished");
+        return Ok(());
     }
-    params.msgr.write(NextTurnMessage {});
-    println!("Ai system is finished");
+    let current_country = &params.countries.countries[current_country_idx];
+    if current_country_idx == params.player_data.country_idx {
+        params.ai_processing.country_idx += 1;
+        return Ok(());
+    }
+    process_diplomacy(
+        current_country_idx,
+        &params.countries,
+        &params.diplomacy,
+        &country_strengths,
+        &params.armies,
+        &mut params.relation_msg,
+        &mut params.propose_peace_msg,
+    )?;
+    process_economy(
+        (current_country, current_country_idx),
+        &params.map_settings,
+        &country_owned_positions,
+        &params.tile_grid,
+        &params.map_tiles,
+        &mut params.build_msg,
+        &ownership_map,
+    )?;
+    process_recruitment(
+        (current_country, current_country_idx),
+        &params.map_settings,
+        &country_owned_positions,
+        &params.tile_grid,
+        &mut params.spawn_msg,
+        &ownership_map,
+        &params.armies,
+    )?;
+    process_army_movement(
+        current_country_idx,
+        &params.armies,
+        &ownership_map,
+        &params.diplomacy,
+        &mut params.army_movements,
+    )?;
+    params.ai_processing.country_idx += 1;
     Ok(())
 }
 

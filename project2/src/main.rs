@@ -41,6 +41,7 @@ pub enum InGameStates {
     #[default]
     Idle,
     MovingArmy,
+    AiTurn,
 }
 
 fn main() {
