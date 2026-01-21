@@ -27,7 +27,9 @@ use crate::ai::systems::AiTurnMessage;
 use crate::common::components::GridPosition;
 use crate::common::messages::SaveGameMessage;
 use crate::common::systems::{SAVE_PATH, get_save_path};
-use crate::country::messages::ChangeRelationMessage;
+use crate::country::messages::{
+    AcceptPeaceMessage, ChangeRelationMessage, ProposePeaceMessage, RejectPeaceMessage,
+};
 use crate::map::messages::ArmyBattleMessage;
 use crate::ui::messages::UiClickMessage;
 use crate::ui::resources::UiSounds;
@@ -347,10 +349,9 @@ fn diplomacy_ui(
         && ui.button("Peace").clicked()
     {
         msgs.ui_click_message.write(UiClickMessage {});
-        msgs.change_relation.write(ChangeRelationMessage {
-            country_a_idx: resources.player_data.country_idx,
-            country_b_idx: idx,
-            relation: RelationStatus::Neutral,
+        msgs.propose_peace_message.write(ProposePeaceMessage {
+            from: resources.player_data.country_idx,
+            to: idx,
         });
     }
 
@@ -713,4 +714,66 @@ fn get_country_from_selection_state<'a>(
     }
 
     None
+}
+
+fn peace_offer_window_ui(
+    ui: &mut egui::Ui,
+    from_country_name: &str,
+    offer: &PeaceOffer,
+    accept_peace_msg: &mut MessageWriter<AcceptPeaceMessage>,
+    reject_peace_msg: &mut MessageWriter<RejectPeaceMessage>,
+    ui_click_message_writer: &mut MessageWriter<UiClickMessage>,
+) {
+    ui.label(format!("Country {} offers peace.", from_country_name));
+
+    ui.horizontal(|ui| {
+        if ui.button("Accept").clicked() {
+            ui_click_message_writer.write(UiClickMessage {});
+            accept_peace_msg.write(AcceptPeaceMessage {
+                from: offer.from,
+                to: offer.to,
+            });
+        }
+        if ui.button("Reject").clicked() {
+            ui_click_message_writer.write(UiClickMessage {});
+            reject_peace_msg.write(RejectPeaceMessage {
+                from: offer.from,
+                to: offer.to,
+            });
+        }
+    });
+}
+
+pub fn display_peace_offers_system(
+    mut contexts: EguiContexts,
+    player_data: Res<PlayerData>,
+    peace_offers: Res<PeaceOffers>,
+    countries: Res<Countries>,
+    mut accept_peace_msg: MessageWriter<AcceptPeaceMessage>,
+    mut reject_peace_msg: MessageWriter<RejectPeaceMessage>,
+    mut ui_click_message_writer: MessageWriter<UiClickMessage>,
+) -> anyhow::Result<()> {
+    let ctx = contexts.ctx_mut()?;
+
+    for offer in peace_offers.offers.iter() {
+        if offer.to == player_data.country_idx {
+            let from_country_name = &countries.countries[offer.from].name;
+
+            Window::new(format!("Peace Offer from {}", from_country_name))
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .show(ctx, |ui| {
+                    peace_offer_window_ui(
+                        ui,
+                        from_country_name,
+                        offer,
+                        &mut accept_peace_msg,
+                        &mut reject_peace_msg,
+                        &mut ui_click_message_writer,
+                    );
+                });
+        }
+    }
+    Ok(())
 }

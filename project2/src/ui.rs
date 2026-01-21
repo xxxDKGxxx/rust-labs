@@ -28,7 +28,11 @@ impl Plugin for UiPlugin {
             .add_systems(Startup, (load_menu_icons, setup_audio))
             .add_systems(
                 EguiPrimaryContextPass,
-                (setup_ui.pipe(log_error),).run_if(in_state(GameState::InGame)),
+                (
+                    setup_ui.pipe(log_error),
+                    display_peace_offers_system.pipe(log_error),
+                )
+                    .run_if(in_state(GameState::InGame)),
             )
             .add_systems(
                 EguiPrimaryContextPass,

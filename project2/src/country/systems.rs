@@ -4,7 +4,7 @@ use bevy::{
     color::*,
     ecs::{
         entity::Entity,
-        message::MessageReader,
+        message::{MessageReader, MessageWriter},
         query::{Changed, Has, With, Without},
         system::*,
     },
@@ -24,7 +24,9 @@ use crate::{
     },
     country::{
         components::{CountryFlag, OwnershipTile},
-        messages::ChangeRelationMessage,
+        messages::{
+            AcceptPeaceMessage, ChangeRelationMessage, ProposePeaceMessage, RejectPeaceMessage,
+        },
         resources::*,
     },
     map::{components::*, resources::MapSettings},
@@ -179,6 +181,80 @@ pub fn relation_managing_system(
             change_relation_message.country_b_idx,
             change_relation_message.relation,
         );
+    }
+}
+
+pub fn propose_peace_system(
+    mut propose_peace_reader: MessageReader<ProposePeaceMessage>,
+    mut peace_offers: ResMut<PeaceOffers>,
+    diplomacy: Res<Diplomacy>,
+) {
+    for proposal in propose_peace_reader.read() {
+        if !matches!(
+            diplomacy.get_relation(proposal.from, proposal.to),
+            RelationStatus::AtWar
+        ) {
+            continue;
+        }
+
+        let offer_already_pending = peace_offers.offers.iter().any(|offer| {
+            (offer.from == proposal.from && offer.to == proposal.to)
+                || (offer.from == proposal.to && offer.to == proposal.from)
+        });
+
+        if offer_already_pending {
+            continue;
+        }
+
+        peace_offers.offers.push(PeaceOffer {
+            from: proposal.from,
+            to: proposal.to,
+        });
+    }
+}
+
+pub fn accept_peace_system(
+    mut accept_peace_reader: MessageReader<AcceptPeaceMessage>,
+    mut peace_offers: ResMut<PeaceOffers>,
+    mut change_relation_writer: MessageWriter<ChangeRelationMessage>,
+) {
+    for message in accept_peace_reader.read() {
+        peace_offers.offers.retain(|offer| {
+            !((offer.from == message.from && offer.to == message.to)
+                || (offer.from == message.to && offer.to == message.from))
+        });
+
+        change_relation_writer.write(ChangeRelationMessage {
+            country_a_idx: message.from,
+            country_b_idx: message.to,
+            relation: RelationStatus::Neutral,
+        });
+    }
+}
+
+pub fn reject_peace_system(
+    mut reject_peace_reader: MessageReader<RejectPeaceMessage>,
+    mut peace_offers: ResMut<PeaceOffers>,
+) {
+    for message in reject_peace_reader.read() {
+        peace_offers.offers.retain(|offer| {
+            !((offer.from == message.from && offer.to == message.to)
+                || (offer.from == message.to && offer.to == message.from))
+        });
+    }
+}
+
+pub fn clean_peace_offers_on_relation_change_system(
+    mut change_relation_reader: MessageReader<ChangeRelationMessage>,
+    mut peace_offers: ResMut<PeaceOffers>,
+) {
+    for message in change_relation_reader.read() {
+        if matches!(message.relation, RelationStatus::Neutral) {
+            peace_offers.offers.retain(|offer| {
+                !((offer.from == message.country_a_idx && offer.to == message.country_b_idx)
+                    || (offer.from == message.country_b_idx && offer.to == message.country_a_idx))
+            });
+        }
     }
 }
 

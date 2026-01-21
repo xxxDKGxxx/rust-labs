@@ -8,8 +8,10 @@ use crate::{
     common::{components::GridPosition, messages::NextTurnMessage},
     country::{
         components::OwnershipTile,
-        messages::ChangeRelationMessage,
-        resources::{Countries, Country, Diplomacy, RelationStatus},
+        messages::{
+            AcceptPeaceMessage, ChangeRelationMessage, ProposePeaceMessage, RejectPeaceMessage,
+        },
+        resources::{Countries, Country, Diplomacy, PeaceOffers, RelationStatus},
     },
     map::{
         components::{Army, Building, MapTile},
@@ -35,6 +37,10 @@ pub struct AiSystemParams<'w, 's> {
     build_msg: MessageWriter<'w, BuildBuildingMessage>,
     spawn_msg: MessageWriter<'w, SpawnArmyMessage>,
     relation_msg: MessageWriter<'w, ChangeRelationMessage>,
+    propose_peace_msg: MessageWriter<'w, ProposePeaceMessage>,
+    accept_peace_msg: MessageWriter<'w, AcceptPeaceMessage>,
+    reject_peace_msg: MessageWriter<'w, RejectPeaceMessage>,
+    peace_offers: Res<'w, PeaceOffers>,
     ownership_tiles: Query<'w, 's, (&'static OwnershipTile, &'static GridPosition)>,
     map_tiles: Query<'w, 's, Has<Building>, With<MapTile>>,
     armies: Query<'w, 's, (Entity, &'static Army, &'static GridPosition)>,
@@ -49,6 +55,15 @@ pub fn ai_system(mut params: AiSystemParams) -> Result<()> {
     let country_strengths =
         calculate_country_strengths(&params.countries, &country_owned_positions, &params.armies);
 
+    ai_evaluate_peace_offers(
+        &params.player_data,
+        &params.peace_offers,
+        &params.diplomacy,
+        &country_strengths,
+        &mut params.accept_peace_msg,
+        &mut params.reject_peace_msg,
+    );
+
     for (country_idx, country) in params.countries.countries.iter().enumerate() {
         if country_idx == params.player_data.country_idx {
             continue;
@@ -60,6 +75,7 @@ pub fn ai_system(mut params: AiSystemParams) -> Result<()> {
             &country_strengths,
             &params.armies,
             &mut params.relation_msg,
+            &mut params.propose_peace_msg,
         )?;
         process_economy(
             (country, country_idx),
@@ -141,6 +157,7 @@ fn process_diplomacy(
     country_strengths: &HashMap<usize, i32>,
     armies: &Query<(Entity, &Army, &GridPosition)>,
     relation_msg: &mut MessageWriter<ChangeRelationMessage>,
+    propose_peace_msg: &mut MessageWriter<ProposePeaceMessage>,
 ) -> Result<()> {
     for other_idx in 0..countries.countries.len() {
         if country_idx == other_idx {
@@ -164,10 +181,9 @@ fn process_diplomacy(
                     && my_army_strength < other_army_strength / 2
                     && rng().random_bool(0.3)
                 {
-                    relation_msg.write(ChangeRelationMessage {
-                        country_a_idx: country_idx,
-                        country_b_idx: other_idx,
-                        relation: RelationStatus::Neutral,
+                    propose_peace_msg.write(ProposePeaceMessage {
+                        from: country_idx,
+                        to: other_idx,
                     });
                 }
             }
@@ -443,4 +459,46 @@ fn count_friendly_neighbors(
         }
     }
     count
+}
+
+fn ai_evaluate_peace_offers(
+    player_data: &Res<PlayerData>,
+    peace_offers: &Res<PeaceOffers>,
+    diplomacy: &Res<Diplomacy>,
+    country_strengths: &HashMap<usize, i32>,
+    accept_peace_msg: &mut MessageWriter<AcceptPeaceMessage>,
+    reject_peace_msg: &mut MessageWriter<RejectPeaceMessage>,
+) {
+    let mut rng = rng();
+
+    for offer in peace_offers.offers.iter() {
+        if offer.to == player_data.country_idx {
+            continue;
+        }
+
+        if diplomacy.get_relation(offer.to, offer.from) != RelationStatus::AtWar {
+            continue;
+        }
+
+        let my_strength = country_strengths.get(&offer.to).copied().unwrap_or(0);
+        let proposer_strength = country_strengths.get(&offer.from).copied().unwrap_or(0);
+
+        let should_accept = if my_strength < proposer_strength / 2 {
+            rng.random_bool(0.7)
+        } else {
+            rng.random_bool(0.2)
+        };
+
+        if should_accept {
+            accept_peace_msg.write(AcceptPeaceMessage {
+                from: offer.from,
+                to: offer.to,
+            });
+        } else {
+            reject_peace_msg.write(RejectPeaceMessage {
+                from: offer.from,
+                to: offer.to,
+            });
+        }
+    }
 }

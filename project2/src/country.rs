@@ -11,8 +11,10 @@ use crate::{
     GameState,
     common::{GenerateSet, LoadSet},
     country::{
-        messages::ChangeRelationMessage,
-        resources::{Countries, Diplomacy},
+        messages::{
+            AcceptPeaceMessage, ChangeRelationMessage, ProposePeaceMessage, RejectPeaceMessage,
+        },
+        resources::{Countries, Diplomacy, PeaceOffers},
         systems::*,
     },
     log_error,
@@ -30,7 +32,11 @@ impl Plugin for CountryPlugin {
     fn build(&self, app: &mut bevy::app::App) {
         app.init_resource::<Countries>()
             .insert_resource(Diplomacy::new())
+            .init_resource::<PeaceOffers>()
             .add_message::<ChangeRelationMessage>()
+            .add_message::<ProposePeaceMessage>()
+            .add_message::<AcceptPeaceMessage>()
+            .add_message::<RejectPeaceMessage>()
             .add_systems(
                 OnEnter(GameState::Generating),
                 (
@@ -52,7 +58,11 @@ impl Plugin for CountryPlugin {
                 Update,
                 (
                     money_gathering_system.pipe(log_error),
+                    propose_peace_system,
+                    accept_peace_system,
+                    reject_peace_system,
                     relation_managing_system,
+                    clean_peace_offers_on_relation_change_system.after(relation_managing_system),
                 )
                     .run_if(in_state(GameState::InGame)),
             )

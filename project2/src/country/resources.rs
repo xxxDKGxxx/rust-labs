@@ -43,7 +43,7 @@ impl FromWorld for Countries {
     }
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RelationStatus {
     Neutral,
     AtWar,
@@ -101,4 +101,15 @@ impl Diplomacy {
 
         self.relatons.insert(key, relation);
     }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
+pub struct PeaceOffer {
+    pub from: usize,
+    pub to: usize,
+}
+
+#[derive(Resource, Default)]
+pub struct PeaceOffers {
+    pub offers: Vec<PeaceOffer>,
 }
