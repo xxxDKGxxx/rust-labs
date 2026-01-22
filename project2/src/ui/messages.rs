@@ -4,7 +4,6 @@ use bevy::ecs::{
 };
 
 use crate::{
-    ai::systems::AiTurnMessage,
     common::messages::{NextTurnMessage, SaveGameMessage},
     country::messages::{ChangeRelationMessage, ProposePeaceMessage},
     map::messages::{BuildBuildingMessage, SaveMapMessage, SpawnArmyMessage},
@@ -12,7 +11,6 @@ use crate::{
 
 #[derive(SystemParam)]
 pub struct UiGameMessages<'w> {
-    pub ai_turn: MessageWriter<'w, AiTurnMessage>,
     pub build_building: MessageWriter<'w, BuildBuildingMessage>,
     pub spawn_army: MessageWriter<'w, SpawnArmyMessage>,
     pub change_relation: MessageWriter<'w, ChangeRelationMessage>,

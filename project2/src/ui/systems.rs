@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use bevy::{
     app::AppExit,
     color::Color,
@@ -18,15 +18,14 @@ use bevy::{
     utils::default,
 };
 use bevy_egui::{
-    egui::{self, DragValue, Window},
     EguiContexts,
+    egui::{self, DragValue, Window},
 };
 use std::fs;
 
-use crate::ai::systems::AiTurnMessage;
 use crate::common::components::GridPosition;
 use crate::common::messages::SaveGameMessage;
-use crate::common::systems::{get_save_path, SAVE_PATH};
+use crate::common::systems::{SAVE_PATH, get_save_path};
 use crate::country::messages::{
     AcceptPeaceMessage, ChangeRelationMessage, ProposePeaceMessage, RejectPeaceMessage,
 };
@@ -34,6 +33,7 @@ use crate::map::messages::{ArmyBattleMessage, SaveMapMessage};
 use crate::ui::messages::UiClickMessage;
 use crate::ui::resources::UiSounds;
 use crate::{
+    GameState, InGameStates,
     common::messages::NextTurnMessage,
     country::{components::OwnershipTile, resources::*},
     map::{
@@ -47,7 +47,6 @@ use crate::{
         messages::UiGameMessages,
         resources::{GameLoadState, MenuIcons, TurnCounter, UiModel},
     },
-    GameState, InGameStates,
 };
 
 pub fn setup_audio(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -205,6 +204,7 @@ pub struct ControlsUiResources<'w> {
     current_state: Res<'w, State<InGameStates>>,
     diplomacy: Res<'w, Diplomacy>,
     next_state: ResMut<'w, NextState<InGameStates>>,
+    ui_model: ResMut<'w, UiModel>,
 }
 
 fn save_popup_ui(ctx: &egui::Context, ui_model: &mut UiModel, msgs: &mut UiGameMessages) {
@@ -273,50 +273,92 @@ pub fn setup_ui(
     mut contexts: EguiContexts,
     mut msgs: UiGameMessages,
     mut resources: ControlsUiResources,
-    mut ui_model: ResMut<UiModel>,
     ownership_tiles: Query<(&OwnershipTile, &GridPosition)>,
     map_tiles: Query<(&MapTile, Has<Building>)>,
     army_query: Query<(Entity, &Army, &GridPosition)>,
 ) -> Result<()> {
     let ctx = contexts.ctx_mut()?;
-    let building_cost = resources.map_settings.building_cost;
     Window::new("Managing Centre").show(ctx, |ui| -> Result<()> {
-        if let Some((country, idx)) = get_country_from_selection_state(
-            &resources.selection_state,
-            &ownership_tiles,
-            &resources.countries,
-        ) && let Some((selected_tile_pos, selected_tile_entity)) =
-            get_selected_tile_from_selection_state(&resources.selection_state)
-        {
-            country_ui(ui, country);
-            let (_, has_building) = map_tiles.get(selected_tile_entity)?;
-            let army_at_pos = army_query
-                .iter()
-                .find(|(_, _, pos)| pos.x == selected_tile_pos.0 && pos.y == selected_tile_pos.1);
-            if resources.player_data.country_idx == idx {
-                if !has_building {
-                    building_ui(&mut msgs, building_cost, ui, idx, selected_tile_entity);
-                }
-                army_ui(
-                    &mut resources,
-                    &mut msgs,
-                    army_at_pos.map(|(e, a, _)| (e, a)),
-                    ui,
-                    idx,
-                    selected_tile_entity,
-                    &mut ui_model,
-                );
-            } else {
-                diplomacy_ui(&mut msgs, &resources, ui, idx);
-            }
-        }
-        turn_ui(&mut msgs, &mut resources, ui, &ui_model);
-        save_ui(&mut msgs, &mut ui_model, ui);
-        save_popup_ui(ctx, &mut ui_model, &mut msgs);
-        save_map_popup_ui(ctx, &mut ui_model, &mut msgs);
+        selection_ui_components(
+            &mut msgs,
+            &mut resources,
+            ownership_tiles,
+            map_tiles,
+            army_query,
+            ui,
+        )?;
+        turn_ui(&mut msgs, &mut resources, ui);
+        save_ui(&mut msgs, &mut resources.ui_model, ui);
+        save_popup_ui(ctx, &mut resources.ui_model, &mut msgs);
+        save_map_popup_ui(ctx, &mut resources.ui_model, &mut msgs);
         Ok(())
     });
     Ok(())
+}
+
+fn selection_ui_components(
+    msgs: &mut UiGameMessages<'_>,
+    resources: &mut ControlsUiResources<'_>,
+    ownership_tiles: Query<'_, '_, (&OwnershipTile, &GridPosition)>,
+    map_tiles: Query<'_, '_, (&MapTile, Has<Building>)>,
+    army_query: Query<'_, '_, (Entity, &Army, &GridPosition)>,
+    ui: &mut egui::Ui,
+) -> Result<(), anyhow::Error> {
+    let _: () = if let Some((country, idx)) = get_country_from_selection_state(
+        &resources.selection_state,
+        &ownership_tiles,
+        &resources.countries,
+    ) && let Some((selected_tile_pos, selected_tile_entity)) =
+        get_selected_tile_from_selection_state(&resources.selection_state)
+    {
+        country_ui(ui, country);
+        let (_, has_building) = map_tiles.get(selected_tile_entity)?;
+        let army_at_pos = army_query
+            .iter()
+            .find(|(_, _, pos)| pos.x == selected_tile_pos.0 && pos.y == selected_tile_pos.1);
+        if resources.player_data.country_idx == idx {
+            player_own_country_management_ui(
+                msgs,
+                resources,
+                ui,
+                has_building,
+                army_at_pos,
+                idx,
+                selected_tile_entity,
+            );
+        } else {
+            diplomacy_ui(msgs, &*resources, ui, idx);
+        }
+    };
+    Ok(())
+}
+
+fn player_own_country_management_ui(
+    msgs: &mut UiGameMessages<'_>,
+    resources: &mut ControlsUiResources<'_>,
+    ui: &mut egui::Ui,
+    has_building: bool,
+    army_at_pos: Option<(Entity, &Army, &GridPosition)>,
+    idx: usize,
+    selected_tile_entity: Entity,
+) {
+    if !has_building {
+        building_ui(
+            msgs,
+            resources.map_settings.building_cost,
+            ui,
+            idx,
+            selected_tile_entity,
+        );
+    }
+    army_ui(
+        resources,
+        msgs,
+        army_at_pos.map(|(e, a, _)| (e, a)),
+        ui,
+        idx,
+        selected_tile_entity,
+    );
 }
 
 fn save_ui(msgs: &mut UiGameMessages<'_>, ui_model: &mut ResMut<'_, UiModel>, ui: &mut egui::Ui) {
@@ -374,13 +416,10 @@ fn diplomacy_ui(
     idx: usize,
 ) {
     ui.heading("Diplomacy");
-
     let relation = resources
         .diplomacy
         .get_relation(resources.player_data.country_idx, idx);
-
     ui.label(format!("Relation: {}", relation));
-
     if let RelationStatus::AtWar = relation
         && ui.button("Peace").clicked()
     {
@@ -390,7 +429,6 @@ fn diplomacy_ui(
             to: idx,
         });
     }
-
     if let RelationStatus::Neutral = relation
         && ui.button("Declare war").clicked()
     {
@@ -401,7 +439,6 @@ fn diplomacy_ui(
             relation: RelationStatus::AtWar,
         });
     }
-
     ui.separator();
 }
 
@@ -436,6 +473,7 @@ pub fn update_turn_counter(
         turn_counter.as_mut().count += 1;
     }
 }
+
 fn main_menu_buttons(
     ui: &mut egui::Ui,
     next_state: &mut ResMut<NextState<GameState>>,
@@ -445,7 +483,6 @@ fn main_menu_buttons(
 ) {
     ui.heading("Project 2");
     ui.add_space(10.0);
-
     if ui
         .add(egui::Button::new("Start Game").min_size([100.0, 30.0].into()))
         .clicked()
@@ -453,9 +490,22 @@ fn main_menu_buttons(
         sound.write(UiClickMessage {});
         next_state.set(GameState::CountrySelection);
     }
-
+    loading_menu_items(ui, next_state, sound);
     ui.add_space(5.0);
+    ui.checkbox(&mut ui_model.ai_on, "AI on?");
+    ui.add_space(5.0);
+    if ui.button("Quit").clicked() {
+        sound.write(UiClickMessage {});
+        exit.write(AppExit::Success);
+    }
+}
 
+fn loading_menu_items(
+    ui: &mut egui::Ui,
+    next_state: &mut ResMut<'_, NextState<GameState>>,
+    sound: &mut MessageWriter<'_, UiClickMessage>,
+) {
+    ui.add_space(5.0);
     if ui
         .add(egui::Button::new("Load Game").min_size([100.0, 30.0].into()))
         .clicked()
@@ -463,26 +513,13 @@ fn main_menu_buttons(
         sound.write(UiClickMessage {});
         next_state.set(GameState::LoadGame);
     }
-
     ui.add_space(5.0);
-
     if ui
         .add(egui::Button::new("Load Map").min_size([100.0, 30.0].into()))
         .clicked()
     {
         sound.write(UiClickMessage {});
         next_state.set(GameState::LoadMap);
-    }
-
-    ui.add_space(5.0);
-
-    ui.checkbox(&mut ui_model.ai_on, "AI on?");
-
-    ui.add_space(5.0);
-
-    if ui.button("Quit").clicked() {
-        sound.write(UiClickMessage {});
-        exit.write(AppExit::Success);
     }
 }
 
@@ -513,7 +550,6 @@ pub fn load_map_menu_system(
     mut ui_click_message_writer: MessageWriter<UiClickMessage>,
 ) -> anyhow::Result<()> {
     let ctx = contexts.ctx_mut()?;
-
     egui::Window::new("Load Map")
         .collapsible(false)
         .resizable(false)
@@ -521,7 +557,6 @@ pub fn load_map_menu_system(
         .show(ctx, |ui| {
             ui.heading("Select a map");
             ui.add_space(10.0);
-
             if let Ok(paths) = fs::read_dir("./maps") {
                 for path in paths.flatten() {
                     let path = path.path();
@@ -536,14 +571,12 @@ pub fn load_map_menu_system(
                     }
                 }
             }
-
             ui.add_space(10.0);
             if ui.button("Back").clicked() {
                 ui_click_message_writer.write(UiClickMessage {});
                 next_state.set(GameState::Menu);
             }
         });
-
     Ok(())
 }
 
@@ -554,7 +587,6 @@ pub fn load_game_menu_system(
     mut ui_click_message_writer: MessageWriter<UiClickMessage>,
 ) -> anyhow::Result<()> {
     let ctx = contexts.ctx_mut()?;
-
     egui::Window::new("Load Game")
         .collapsible(false)
         .resizable(false)
@@ -562,7 +594,6 @@ pub fn load_game_menu_system(
         .show(ctx, |ui| {
             ui.heading("Select a save");
             ui.add_space(10.0);
-
             if let Ok(paths) = fs::read_dir("./saves") {
                 for path in paths.flatten() {
                     let path = path.path();
@@ -577,14 +608,12 @@ pub fn load_game_menu_system(
                     }
                 }
             }
-
             ui.add_space(10.0);
             if ui.button("Back").clicked() {
                 ui_click_message_writer.write(UiClickMessage {});
                 next_state.set(GameState::Menu);
             }
         });
-
     Ok(())
 }
 
@@ -639,7 +668,6 @@ fn turn_ui(
     msgs: &mut UiGameMessages<'_>,
     resources: &mut ControlsUiResources<'_>,
     ui: &mut egui::Ui,
-    ui_model: &UiModel,
 ) {
     ui.heading("Turn information");
 
@@ -650,7 +678,7 @@ fn turn_ui(
     if ui.button("End Turn").clicked() {
         println!("End turn click");
         msgs.ui_click_message.write(UiClickMessage {});
-        if !ui_model.ai_on {
+        if !resources.ui_model.ai_on {
             if resources.player_data.country_idx == resources.countries.countries.len() - 1 {
                 msgs.next_turn_message.write(NextTurnMessage {});
                 resources.player_data.country_idx = 0;
@@ -672,10 +700,11 @@ fn army_ui(
     ui: &mut egui::Ui,
     idx: usize,
     selected_tile_entity: Entity,
-    ui_model: &mut UiModel,
 ) {
     ui.heading("Army");
-    ui.add(DragValue::new(&mut ui_model.selected_number_of_units));
+    ui.add(DragValue::new(
+        &mut resources.ui_model.selected_number_of_units,
+    ));
     ui.label(format!("Unit cost: {}", resources.map_settings.unit_cost));
 
     if ui.button("Recruit").clicked() {
@@ -683,7 +712,7 @@ fn army_ui(
         ui_game_messages.spawn_army.write(SpawnArmyMessage {
             tile_entity: selected_tile_entity,
             country_idx: idx,
-            amount: ui_model.selected_number_of_units,
+            amount: resources.ui_model.selected_number_of_units,
         });
     }
 
@@ -693,7 +722,7 @@ fn army_ui(
         && ui.button("Move").clicked()
     {
         ui_game_messages.ui_click_message.write(UiClickMessage {});
-        ui_model.army_entity_being_moved = Some(entity);
+        resources.ui_model.army_entity_being_moved = Some(entity);
         resources.next_state.set(InGameStates::MovingArmy);
     }
 
@@ -743,9 +772,9 @@ pub fn load_menu_icons(mut menu_icons: ResMut<MenuIcons>, asset_server: Res<Asse
 
 pub fn country_selection_system(
     mut contexts: EguiContexts,
-    mut next_state: ResMut<NextState<GameState>>,
-    mut player_data: ResMut<PlayerData>,
-    mut ui_click_message_writer: MessageWriter<UiClickMessage>,
+    next_state: ResMut<NextState<GameState>>,
+    player_data: ResMut<PlayerData>,
+    ui_click_message_writer: MessageWriter<UiClickMessage>,
     menu_icons: Res<MenuIcons>,
 ) -> anyhow::Result<()> {
     let texture_ids: Vec<_> = menu_icons
@@ -753,9 +782,24 @@ pub fn country_selection_system(
         .iter()
         .map(|icon| contexts.add_image(bevy_egui::EguiTextureHandle::Strong(icon.clone())))
         .collect();
-
     let ctx = contexts.ctx_mut()?;
+    select_country_window(
+        next_state,
+        player_data,
+        ui_click_message_writer,
+        texture_ids,
+        ctx,
+    );
+    Ok(())
+}
 
+fn select_country_window(
+    mut next_state: ResMut<'_, NextState<GameState>>,
+    mut player_data: ResMut<'_, PlayerData>,
+    mut ui_click_message_writer: MessageWriter<'_, UiClickMessage>,
+    texture_ids: Vec<egui::TextureId>,
+    ctx: &mut egui::Context,
+) {
     egui::Window::new("Select Country")
         .collapsible(false)
         .resizable(false)
@@ -763,7 +807,6 @@ pub fn country_selection_system(
         .show(ctx, |ui| {
             ui.heading("Choose your country");
             ui.add_space(10.0);
-
             ui.horizontal(|ui| {
                 for (i, texture_id) in texture_ids.into_iter().enumerate() {
                     if ui
@@ -780,9 +823,8 @@ pub fn country_selection_system(
                 }
             });
         });
-
-    Ok(())
 }
+
 fn get_country_from_selection_state<'a>(
     select_state: &Res<SelectionState>,
     ownership_tiles: &Query<(&OwnershipTile, &GridPosition)>,

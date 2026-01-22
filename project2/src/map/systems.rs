@@ -61,6 +61,40 @@ pub fn save_map_terrain_system(
     Ok(())
 }
 
+fn generate_new_map(
+    commands: &mut Commands,
+    map_settings: &Res<MapSettings>,
+    tile_grid: &mut ResMut<TileMapGrid>,
+) {
+    let half_tile = map_settings.tile_size as f32 / 2.0;
+    let offset_x = -((map_settings.width * map_settings.tile_size) as f32) / 2.0 + half_tile;
+    let offset_y = -((map_settings.height * map_settings.tile_size) as f32) / 2.0 + half_tile;
+
+    let perlin = noise::Perlin::new(random());
+    let scale = 0.05f32;
+
+    for x in 0..map_settings.width {
+        for y in 0..map_settings.height {
+            let world_pos_x = (x * map_settings.tile_size) as f32 + offset_x;
+            let world_pos_y = (y * map_settings.tile_size) as f32 + offset_y;
+
+            let tile_type = tile_type_from_noise(map_settings, perlin, scale, x, y);
+
+            let entity = spawn_tile(
+                commands,
+                map_settings,
+                x,
+                y,
+                world_pos_x,
+                world_pos_y,
+                tile_type,
+            );
+
+            tile_grid.grid.insert((x, y), entity);
+        }
+    }
+}
+
 pub fn setup_map(
     mut commands: Commands,
     map_settings: Res<super::resources::MapSettings>,
@@ -77,35 +111,10 @@ pub fn setup_map(
             spawn_loaded_tiles(&mut commands, &state, &asset_server, &mut tile_grid);
         }
     } else {
-        let half_tile = map_settings.tile_size as f32 / 2.0;
-        let offset_x = -((map_settings.width * map_settings.tile_size) as f32) / 2.0 + half_tile;
-        let offset_y = -((map_settings.height * map_settings.tile_size) as f32) / 2.0 + half_tile;
-
-        let perlin = noise::Perlin::new(random());
-        let scale = 0.05f32;
-
-        for x in 0..map_settings.width {
-            for y in 0..map_settings.height {
-                let world_pos_x = (x * map_settings.tile_size) as f32 + offset_x;
-                let world_pos_y = (y * map_settings.tile_size) as f32 + offset_y;
-
-                let tile_type = tile_type_from_noise(&map_settings, perlin, scale, x, y);
-
-                let entity = spawn_tile(
-                    &mut commands,
-                    &map_settings,
-                    x,
-                    y,
-                    world_pos_x,
-                    world_pos_y,
-                    tile_type,
-                );
-
-                tile_grid.grid.insert((x, y), entity);
-            }
-        }
+        generate_new_map(&mut commands, &map_settings, &mut tile_grid);
     }
 }
+
 pub fn setup_cursor(mut commands: Commands, map_settings: Res<MapSettings>) {
     commands.spawn((
         Sprite {
@@ -147,46 +156,56 @@ pub fn tile_selection_system(
     camera_query: Single<(&Camera, &GlobalTransform), With<Camera2d>>,
     cursor_visibility_query: Single<(&mut Visibility, &mut Transform), With<SelectionCursor>>,
     window: Single<&Window, With<PrimaryWindow>>,
-    mut selected_state: ResMut<SelectionState>,
+    selected_state: ResMut<SelectionState>,
     read_resources: TileSelectionSystemResources,
 ) -> Result<()> {
-    if !read_resources.button_input.just_pressed(MouseButton::Left) {
-        return Ok(());
-    }
-    if egui_contexts.ctx_mut()?.is_pointer_over_area() {
+    if !read_resources.button_input.just_pressed(MouseButton::Left)
+        || egui_contexts.ctx_mut()?.is_pointer_over_area()
+    {
         return Ok(());
     }
 
     let (camera, camera_transform) = camera_query.into_inner();
-    let (mut cursor_visibility, mut cursor_transform) = cursor_visibility_query.into_inner();
-
     let Some(world_pos) = get_world_pos_from_cursor(&window, camera, camera_transform) else {
         return Ok(());
     };
 
+    handle_tile_selection(
+        world_pos,
+        read_resources,
+        cursor_visibility_query,
+        selected_state,
+    );
+
+    Ok(())
+}
+
+fn handle_tile_selection(
+    world_pos: Vec2,
+    read_resources: TileSelectionSystemResources,
+    cursor_visibility_query: Single<(&mut Visibility, &mut Transform), With<SelectionCursor>>,
+    mut selected_state: ResMut<SelectionState>,
+) {
     let (offset_x, offset_y, x, y) =
         calculate_x_y_indicies(&read_resources.map_settings, world_pos);
-
-    let cursor_visibility = cursor_visibility.as_mut();
+    let (mut cursor_visibility, mut cursor_transform) = cursor_visibility_query.into_inner();
 
     let Some(tile) = read_resources.tile_grid.grid.get(&(x, y)) else {
         *cursor_visibility = Visibility::Hidden;
         selected_state.selected_entity = None;
         selected_state.selected_tile = None;
-        return Ok(());
+        return;
     };
 
     update_selection_and_cursor(
-        cursor_transform.as_mut(),
+        &mut cursor_transform,
         read_resources.map_settings,
         selected_state,
         (offset_x, offset_y),
         (x, y),
-        cursor_visibility,
+        &mut cursor_visibility,
         tile,
     );
-
-    Ok(())
 }
 
 pub fn map_visibility_toggling_system(
@@ -403,6 +422,64 @@ pub fn save_map_system(
     Ok(())
 }
 
+fn spawn_tile_from_save(
+    commands: &mut Commands,
+    map_tile: &MapTile,
+    grid_position: &GridPosition,
+    has_building: &bool,
+    map_settings: &MapSettings,
+    asset_server: &AssetServer,
+    tile_grid: &mut TileMapGrid,
+) {
+    let world_pos = grid_to_world(grid_position, map_settings);
+    let mut entity_commands = commands.spawn((
+        map_tile.clone(),
+        *grid_position,
+        Sprite {
+            color: Color::from(&map_tile.tile_type),
+            custom_size: Some(Vec2::new(
+                map_settings.tile_size as f32 - 3.0,
+                map_settings.tile_size as f32 - 3.0,
+            )),
+            ..Default::default()
+        },
+        Transform::from_translation(world_pos.with_z(50.0)),
+    ));
+    if *has_building {
+        spawn_building_to_map_tile_entity_commands(
+            map_settings,
+            asset_server,
+            &mut entity_commands,
+        );
+    }
+    tile_grid
+        .grid
+        .insert((grid_position.x, grid_position.y), entity_commands.id());
+}
+
+fn spawn_building_to_map_tile_entity_commands(
+    map_settings: &MapSettings,
+    asset_server: &AssetServer,
+    entity_commands: &mut EntityCommands<'_>,
+) {
+    entity_commands.insert(Building {});
+    entity_commands.with_children(|parent| {
+        let building_texture = asset_server.load("building_texture.png");
+
+        parent.spawn((
+            Sprite {
+                image: building_texture,
+                custom_size: Some(Vec2::new(
+                    map_settings.tile_size as f32,
+                    map_settings.tile_size as f32,
+                )),
+                ..Default::default()
+            },
+            Transform::from_xyz(0.0, 0.0, 4.0),
+        ));
+    });
+}
+
 fn spawn_loaded_tiles(
     commands: &mut Commands,
     state: &MapSaveState,
@@ -410,41 +487,15 @@ fn spawn_loaded_tiles(
     tile_grid: &mut TileMapGrid,
 ) {
     for (map_tile, grid_position, has_building) in &state.map_tiles {
-        let world_pos = grid_to_world(grid_position, &state.map_settings);
-        let mut entity_commands = commands.spawn((
-            map_tile.clone(),
-            *grid_position,
-            Sprite {
-                color: Color::from(&map_tile.tile_type),
-                custom_size: Some(Vec2::new(
-                    state.map_settings.tile_size as f32 - 3.0,
-                    state.map_settings.tile_size as f32 - 3.0,
-                )),
-                ..Default::default()
-            },
-            Transform::from_translation(world_pos.with_z(50.0)),
-        ));
-        if *has_building {
-            entity_commands.insert(Building {});
-            entity_commands.with_children(|parent| {
-                let building_texture = asset_server.load("building_texture.png");
-
-                parent.spawn((
-                    Sprite {
-                        image: building_texture,
-                        custom_size: Some(Vec2::new(
-                            state.map_settings.tile_size as f32,
-                            state.map_settings.tile_size as f32,
-                        )),
-                        ..Default::default()
-                    },
-                    Transform::from_xyz(0.0, 0.0, 4.0),
-                ));
-            });
-        }
-        tile_grid
-            .grid
-            .insert((grid_position.x, grid_position.y), entity_commands.id());
+        spawn_tile_from_save(
+            commands,
+            map_tile,
+            grid_position,
+            has_building,
+            &state.map_settings,
+            asset_server,
+            tile_grid,
+        );
     }
 }
 
@@ -513,6 +564,41 @@ fn highlight_tile(
     ));
 }
 
+fn highlight_tile_in_range(
+    commands: &mut Commands,
+    resources: &mut ShowMovementRangeSystemResources,
+    army_info: &(Entity, &GridPosition, &Army),
+    tile_info: &(&GridPosition, &MapTile),
+    ownership_tiles_query: &Query<(&OwnershipTile, &GridPosition), Without<Army>>,
+) -> Result<()> {
+    let (army_entity, start_pos, army) = army_info;
+    let (tile_pos, map_tile) = tile_info;
+
+    if start_pos.distance(tile_pos) <= 2.0
+        && *start_pos != *tile_pos
+        && validate_army_movement(
+            army,
+            &MoveArmyMessage {
+                moved_army_entity: *army_entity,
+                target_position: **tile_pos,
+                number_of_units_to_move: 0,
+            },
+            ownership_tiles_query,
+            &resources.diplomacy,
+        )?
+    {
+        highlight_tile(
+            commands,
+            &mut resources.materials,
+            &mut resources.meshes,
+            tile_pos,
+            map_tile,
+            &resources.map_settings,
+        );
+    }
+    Ok(())
+}
+
 pub fn show_movement_range_system(
     mut commands: Commands,
     mut resources: ShowMovementRangeSystemResources,
@@ -524,36 +610,21 @@ pub fn show_movement_range_system(
         return Ok(());
     };
 
-    let Some((army_entity, start_pos, army)) = army_query
+    let Some(army_info) = army_query
         .iter()
         .find(|(_, pos, _)| pos.x == selected_tile_x && pos.y == selected_tile_y)
     else {
         return Ok(());
     };
 
-    for (tile_pos, map_tile) in tiles_query.iter() {
-        if start_pos.distance(tile_pos) <= 2.0
-            && start_pos != tile_pos
-            && validate_army_movement(
-                army,
-                &MoveArmyMessage {
-                    moved_army_entity: army_entity,
-                    target_position: *tile_pos,
-                    number_of_units_to_move: 0,
-                },
-                &ownership_tiles_query,
-                &resources.diplomacy,
-            )?
-        {
-            highlight_tile(
-                &mut commands,
-                &mut resources.materials,
-                &mut resources.meshes,
-                tile_pos,
-                map_tile,
-                &resources.map_settings,
-            );
-        }
+    for tile_info in tiles_query.iter() {
+        highlight_tile_in_range(
+            &mut commands,
+            &mut resources,
+            &army_info,
+            &tile_info,
+            &ownership_tiles_query,
+        )?;
     }
 
     Ok(())
@@ -584,16 +655,8 @@ pub fn detect_army_collisions_system(
         return;
     }
     let army_movements_cloned = army_movements.clone();
-    let movements_with_source_positions: Vec<_> = army_movements_cloned
-        .movements
-        .iter()
-        .filter_map(|movement| {
-            let (_, source_pos, army) = army_pos_query
-                .iter()
-                .find(|(entity, _, _)| *entity == movement.moved_army_entity)?;
-            Some((movement, source_pos, army.country_idx))
-        })
-        .collect();
+    let movements_with_source_positions =
+        add_source_positions_to_movements(&army_pos_query, &army_movements_cloned);
     let collided_armies: Vec<_> = movements_with_source_positions
         .iter()
         .tuple_combinations()
@@ -617,6 +680,23 @@ pub fn detect_army_collisions_system(
             army_b_entity: second_army_movement.moved_army_entity,
         });
     }
+}
+
+fn add_source_positions_to_movements<'a>(
+    army_pos_query: &'a Query<'_, '_, (Entity, &GridPosition, &Army)>,
+    army_movements: &'a ArmyMovements,
+) -> Vec<(&'a MoveArmyMessage, &'a GridPosition, usize)> {
+    let movements_with_source_positions: Vec<_> = army_movements
+        .movements
+        .iter()
+        .filter_map(|movement| {
+            let (_, source_pos, army) = army_pos_query
+                .iter()
+                .find(|(entity, _, _)| *entity == movement.moved_army_entity)?;
+            Some((movement, source_pos, army.country_idx))
+        })
+        .collect();
+    movements_with_source_positions
 }
 
 pub fn resolve_army_battle_system(
@@ -1007,25 +1087,38 @@ fn resolve_armies_on_tile(
         }
     }
     if armies_by_country.len() > 1 {
-        armies_by_country
-            .values()
-            .tuple_combinations()
-            .for_each(|(army_entity1, army_entity2)| {
-                let Ok(mut armies) = army_query.get_many_mut([army_entity1.0, army_entity2.0])
-                else {
-                    return;
-                };
-                let (army1, army2) = armies.split_at_mut(1);
-                army_battle(
-                    commands,
-                    &mut army1[0].3,
-                    &mut army2[0].3,
-                    ArmyBattleMessage {
-                        army_a_entity: army1[0].0,
-                        army_b_entity: army2[0].0,
-                    },
-                    army_battle_message_writer,
-                );
-            });
+        arrange_battles(
+            commands,
+            army_query,
+            army_battle_message_writer,
+            armies_by_country,
+        );
     }
+}
+
+fn arrange_battles(
+    commands: &mut Commands<'_, '_>,
+    army_query: &mut Query<'_, '_, (Entity, &GridPosition, &mut Transform, &mut Army)>,
+    army_battle_message_writer: &mut MessageWriter<'_, ArmyBattleMessage>,
+    armies_by_country: HashMap<usize, (Entity, i32)>,
+) {
+    armies_by_country
+        .values()
+        .tuple_combinations()
+        .for_each(|(army_entity1, army_entity2)| {
+            let Ok(mut armies) = army_query.get_many_mut([army_entity1.0, army_entity2.0]) else {
+                return;
+            };
+            let (army1, army2) = armies.split_at_mut(1);
+            army_battle(
+                commands,
+                &mut army1[0].3,
+                &mut army2[0].3,
+                ArmyBattleMessage {
+                    army_a_entity: army1[0].0,
+                    army_b_entity: army2[0].0,
+                },
+                army_battle_message_writer,
+            );
+        });
 }

@@ -35,9 +35,7 @@ use crate::{
 
 pub fn setup_countries_system(mut countries: ResMut<Countries>) {
     let countries = countries.as_mut();
-
     const COUNTRY_NUM: u8 = 5;
-
     for i in 0..COUNTRY_NUM {
         countries.countries.push(Country::new(
             &format!("C{i}"),
@@ -302,26 +300,42 @@ pub fn update_country_flag_system(
     }
 
     for (entity, country_flag, mut transform) in country_flags.iter_mut() {
-        let owned_tiles = ownership_tiles_query
-            .iter()
-            .filter(|(o, _)| o.country_id == Some(country_flag.idx))
-            .collect::<Vec<_>>();
-
-        if owned_tiles.is_empty() {
-            commands.entity(entity).despawn();
-            continue;
-        }
-
-        let (x_sum, y_sum) = owned_tiles
-            .iter()
-            .fold((0.0, 0.0), |(x, y), (_, transform)| {
-                (x + transform.translation.x, y + transform.translation.y)
-            });
-
-        transform.translation.x = x_sum / owned_tiles.len() as f32;
-        transform.translation.y = y_sum / owned_tiles.len() as f32;
-        transform.translation.z = 51.0;
+        update_single_country_flag(
+            &mut commands,
+            entity,
+            country_flag,
+            &mut transform,
+            &ownership_tiles_query,
+        );
     }
+}
+
+fn update_single_country_flag(
+    commands: &mut Commands,
+    entity: Entity,
+    country_flag: &CountryFlag,
+    transform: &mut Transform,
+    ownership_tiles_query: &Query<(&OwnershipTile, &Transform)>,
+) {
+    let owned_tiles = ownership_tiles_query
+        .iter()
+        .filter(|(o, _)| o.country_id == Some(country_flag.idx))
+        .collect::<Vec<_>>();
+
+    if owned_tiles.is_empty() {
+        commands.entity(entity).despawn();
+        return;
+    }
+
+    let (x_sum, y_sum) = owned_tiles
+        .iter()
+        .fold((0.0, 0.0), |(x, y), (_, transform)| {
+            (x + transform.translation.x, y + transform.translation.y)
+        });
+
+    transform.translation.x = x_sum / owned_tiles.len() as f32;
+    transform.translation.y = y_sum / owned_tiles.len() as f32;
+    transform.translation.z = 51.0;
 }
 
 #[derive(Serialize, Deserialize)]

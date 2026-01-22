@@ -29,7 +29,6 @@ pub struct AiTurnMessage {}
 #[derive(SystemParam)]
 pub struct AiSystemParams<'w, 's> {
     msgr: MessageWriter<'w, NextTurnMessage>,
-    ai_msgr: MessageReader<'w, 's, AiTurnMessage>,
     player_data: Res<'w, PlayerData>,
     countries: Res<'w, Countries>,
     diplomacy: Res<'w, Diplomacy>,
@@ -62,24 +61,49 @@ pub fn ai_system(mut params: AiSystemParams) -> Result<()> {
         &mut params.accept_peace_msg,
         &mut params.reject_peace_msg,
     );
-    let current_country_idx = params.ai_processing.country_idx;
-    if current_country_idx >= params.countries.countries.len() {
+    if let Some(value) = handle_current_country(&mut params) {
+        return value;
+    }
+    process_country_ai(
+        &mut params,
+        &country_strengths,
+        &ownership_map,
+        &country_owned_positions,
+    )?;
+    params.ai_processing.country_idx += 1;
+    Ok(())
+}
+
+fn handle_current_country(
+    params: &mut AiSystemParams<'_, '_>,
+) -> Option<std::result::Result<(), anyhow::Error>> {
+    if params.ai_processing.country_idx >= params.countries.countries.len() {
         params.next_state.set(InGameStates::Idle);
         params.ai_processing.country_idx = 0;
         params.msgr.write(NextTurnMessage {});
         println!("Ai system is finished");
-        return Ok(());
+        return Some(Ok(()));
     }
-    let current_country = &params.countries.countries[current_country_idx];
-    if current_country_idx == params.player_data.country_idx {
+    if params.ai_processing.country_idx == params.player_data.country_idx {
         params.ai_processing.country_idx += 1;
-        return Ok(());
+        return Some(Ok(()));
     }
+    None
+}
+
+fn process_country_ai(
+    params: &mut AiSystemParams,
+    country_strengths: &HashMap<usize, i32>,
+    ownership_map: &OwnershipMap,
+    country_owned_positions: &CountryOwnedPositionsMap,
+) -> Result<()> {
+    let current_country_idx = params.ai_processing.country_idx;
+    let current_country = &params.countries.countries[current_country_idx];
     process_diplomacy(
         current_country_idx,
         &params.countries,
         &params.diplomacy,
-        &country_strengths,
+        country_strengths,
         &params.armies,
         &mut params.relation_msg,
         &mut params.propose_peace_msg,
@@ -87,29 +111,28 @@ pub fn ai_system(mut params: AiSystemParams) -> Result<()> {
     process_economy(
         (current_country, current_country_idx),
         &params.map_settings,
-        &country_owned_positions,
+        country_owned_positions,
         &params.tile_grid,
         &params.map_tiles,
         &mut params.build_msg,
-        &ownership_map,
+        ownership_map,
     )?;
     process_recruitment(
         (current_country, current_country_idx),
         &params.map_settings,
-        &country_owned_positions,
+        country_owned_positions,
         &params.tile_grid,
         &mut params.spawn_msg,
-        &ownership_map,
+        ownership_map,
         &params.armies,
     )?;
     process_army_movement(
         current_country_idx,
         &params.armies,
-        &ownership_map,
+        ownership_map,
         &params.diplomacy,
         &mut params.army_movements,
     )?;
-    params.ai_processing.country_idx += 1;
     Ok(())
 }
 
@@ -168,49 +191,64 @@ fn process_diplomacy(
         if country_idx == other_idx {
             continue;
         }
-
         match diplomacy.get_relation(country_idx, other_idx) {
             RelationStatus::AtWar => {
-                let my_army_strength: i32 = armies
-                    .iter()
-                    .filter(|(_, army, _)| army.country_idx == country_idx)
-                    .map(|(_, army, _)| army.number_of_units)
-                    .sum();
-                let other_army_strength: i32 = armies
-                    .iter()
-                    .filter(|(_, army, _)| army.country_idx == other_idx)
-                    .map(|(_, army, _)| army.number_of_units)
-                    .sum();
-
-                if my_army_strength > 0
-                    && my_army_strength < other_army_strength / 2
-                    && rng().random_bool(0.3)
-                {
-                    propose_peace_msg.write(ProposePeaceMessage {
-                        from: country_idx,
-                        to: other_idx,
-                    });
-                }
+                handle_diplomacy_at_war(country_idx, armies, propose_peace_msg, other_idx);
             }
             RelationStatus::Neutral => {
-                let my_strength = country_strengths
-                    .get(&country_idx)
-                    .ok_or_else(|| anyhow!("Failed to get my strength"))?;
-                let other_strength = country_strengths
-                    .get(&other_idx)
-                    .ok_or_else(|| anyhow!("Failed to get other strength"))?;
-
-                if my_strength > other_strength && rng().random_bool(0.1) {
-                    relation_msg.write(ChangeRelationMessage {
-                        country_a_idx: country_idx,
-                        country_b_idx: other_idx,
-                        relation: RelationStatus::AtWar,
-                    });
-                }
+                handle_diplomacy_neutral(country_idx, country_strengths, relation_msg, other_idx)?;
             }
         }
     }
     Ok(())
+}
+
+fn handle_diplomacy_neutral(
+    country_idx: usize,
+    country_strengths: &HashMap<usize, i32>,
+    relation_msg: &mut MessageWriter<'_, ChangeRelationMessage>,
+    other_idx: usize,
+) -> Result<(), anyhow::Error> {
+    let my_strength = country_strengths
+        .get(&country_idx)
+        .ok_or_else(|| anyhow!("Failed to get my strength"))?;
+    let other_strength = country_strengths
+        .get(&other_idx)
+        .ok_or_else(|| anyhow!("Failed to get other strength"))?;
+    let _: () = if my_strength > other_strength && rng().random_bool(0.1) {
+        relation_msg.write(ChangeRelationMessage {
+            country_a_idx: country_idx,
+            country_b_idx: other_idx,
+            relation: RelationStatus::AtWar,
+        });
+    };
+    Ok(())
+}
+
+fn handle_diplomacy_at_war(
+    country_idx: usize,
+    armies: &Query<'_, '_, (Entity, &Army, &GridPosition)>,
+    propose_peace_msg: &mut MessageWriter<'_, ProposePeaceMessage>,
+    other_idx: usize,
+) {
+    let my_army_strength: i32 = armies
+        .iter()
+        .filter(|(_, army, _)| army.country_idx == country_idx)
+        .map(|(_, army, _)| army.number_of_units)
+        .sum();
+    let other_army_strength: i32 = armies
+        .iter()
+        .filter(|(_, army, _)| army.country_idx == other_idx)
+        .map(|(_, army, _)| army.number_of_units)
+        .sum();
+
+    if my_army_strength > 0 && my_army_strength < other_army_strength / 2 && rng().random_bool(0.3)
+    {
+        propose_peace_msg.write(ProposePeaceMessage {
+            from: country_idx,
+            to: other_idx,
+        });
+    }
 }
 
 fn process_economy(
@@ -226,7 +264,6 @@ fn process_economy(
     if country.money < map_settings.building_cost {
         return Ok(());
     }
-
     if let Some(positions) = country_owned_positions.get(&country_idx) {
         let candidates: Vec<Entity> = positions
             .iter()
@@ -234,7 +271,6 @@ fn process_economy(
             .filter_map(|&(x, y)| tile_grid.grid.get(&(x, y)).copied())
             .filter(|&e| map_tiles.get(e).is_ok_and(|has| !has))
             .collect();
-
         if !candidates.is_empty() && rng().random_bool(0.5) {
             let tile_entity = candidates[rng().random_range(0..candidates.len())];
             build_msg.write(BuildBuildingMessage {
@@ -471,25 +507,20 @@ fn ai_evaluate_peace_offers(
     reject_peace_msg: &mut MessageWriter<RejectPeaceMessage>,
 ) {
     let mut rng = rng();
-
     for offer in peace_offers.offers.iter() {
         if offer.to == player_data.country_idx {
             continue;
         }
-
         if diplomacy.get_relation(offer.to, offer.from) != RelationStatus::AtWar {
             continue;
         }
-
         let my_strength = country_strengths.get(&offer.to).copied().unwrap_or(0);
         let proposer_strength = country_strengths.get(&offer.from).copied().unwrap_or(0);
-
         let should_accept = if my_strength < proposer_strength / 2 {
             rng.random_bool(0.7)
         } else {
             rng.random_bool(0.2)
         };
-
         if should_accept {
             accept_peace_msg.write(AcceptPeaceMessage {
                 from: offer.from,

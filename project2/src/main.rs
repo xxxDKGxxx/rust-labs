@@ -108,15 +108,45 @@ fn camera_zoom(
 
 fn constraint_camera_movement(
     mut transform_query: Single<&mut Transform, With<Camera2d>>,
-    mut projection_query: Single<&mut Projection, With<Camera2d>>,
+    projection_query: Single<&mut Projection, With<Camera2d>>,
     window_query: Single<&Window, With<PrimaryWindow>>,
     map_settings: Res<MapSettings>,
 ) {
     let window = window_query.into_inner();
     let map_width = map_settings.width * map_settings.tile_size;
     let map_height = map_settings.height * map_settings.tile_size;
+    let scale = calculate_scale(projection_query, window, map_width, map_height);
+    let visible_height = window.height() * scale;
+    let visible_width = window.width() * scale;
+    let half_map_width = map_width as f32 / 2.0;
+    let half_map_height = map_height as f32 / 2.0;
+    let half_visible_width = visible_width / 2.0;
+    let half_visible_height = visible_height / 2.0;
+    let min_x = -half_map_width + half_visible_width;
+    let max_x = half_map_width - half_visible_width;
+    let min_y = -half_map_height + half_visible_height;
+    let max_y = half_map_height - half_visible_height;
+    let transform = transform_query.as_mut();
+    if visible_width > map_width as f32 {
+        transform.translation.x = 0.0;
+    } else {
+        transform.translation.x = transform.translation.x.clamp(min_x, max_x);
+    }
+    if visible_height > map_height as f32 {
+        transform.translation.y = 0.0;
+    } else {
+        transform.translation.y = transform.translation.y.clamp(min_y, max_y);
+    }
+}
 
-    let scale = if let Projection::Orthographic(o) = projection_query.as_mut() {
+fn calculate_scale(
+    mut projection_query: Single<'_, '_, &mut Projection, With<Camera2d>>,
+    window: &Window,
+    map_width: i32,
+    map_height: i32,
+) -> f32 {
+    
+    if let Projection::Orthographic(o) = projection_query.as_mut() {
         let max_scale_x = map_width as f32 / window.width();
         let max_scale_y = map_height as f32 / window.height();
 
@@ -127,35 +157,6 @@ fn constraint_camera_movement(
         o.scale
     } else {
         1.0
-    };
-
-    let visible_height = window.height() * scale;
-    let visible_width = window.width() * scale;
-
-    let half_map_width = map_width as f32 / 2.0;
-    let half_map_height = map_height as f32 / 2.0;
-
-    let half_visible_width = visible_width / 2.0;
-    let half_visible_height = visible_height / 2.0;
-
-    let min_x = -half_map_width + half_visible_width;
-    let max_x = half_map_width - half_visible_width;
-
-    let min_y = -half_map_height + half_visible_height;
-    let max_y = half_map_height - half_visible_height;
-
-    let transform = transform_query.as_mut();
-
-    if visible_width > map_width as f32 {
-        transform.translation.x = 0.0;
-    } else {
-        transform.translation.x = transform.translation.x.clamp(min_x, max_x);
-    }
-
-    if visible_height > map_height as f32 {
-        transform.translation.y = 0.0;
-    } else {
-        transform.translation.y = transform.translation.y.clamp(min_y, max_y);
     }
 }
 
