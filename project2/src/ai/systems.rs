@@ -380,13 +380,11 @@ fn calculate_move_score(
 ) -> i32 {
     let mut score = 0;
     let target_key = &(target_pos.x, target_pos.y);
-
     let enemy_army_on_tile = armies.iter().find(|(_, other_army, other_pos)| {
         other_pos.x == target_pos.x
             && other_pos.y == target_pos.y
             && other_army.country_idx != army.country_idx
     });
-
     if let Some((_, enemy_army, _)) = enemy_army_on_tile {
         if army.number_of_units > enemy_army.number_of_units {
             score += 1000;
@@ -396,7 +394,6 @@ fn calculate_move_score(
             score -= 1000;
         }
     }
-
     if let Some(&owner) = ownership_map.get(target_key) {
         if owner != army.country_idx {
             score += 500;
@@ -404,7 +401,6 @@ fn calculate_move_score(
             score += 1;
         }
     }
-
     score += count_friendly_neighbors(target_pos, army.country_idx, ownership_map) * 10;
     score += rng().random_range(0..5);
     score

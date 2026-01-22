@@ -30,6 +30,7 @@ pub enum GameState {
     Menu,
     CountrySelection,
     LoadGame,
+    LoadMap,
     Loading,
     Generating,
     InGame,

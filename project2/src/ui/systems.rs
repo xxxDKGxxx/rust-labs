@@ -1,5 +1,4 @@
-use anyhow::{Result, anyhow};
-use bevy::prelude::*;
+use anyhow::{anyhow, Result};
 use bevy::{
     app::AppExit,
     color::Color,
@@ -11,6 +10,7 @@ use bevy::{
         message::{MessageReader, MessageWriter},
         system::*,
     },
+    prelude::*,
     sprite::Text2d,
     state::state::{NextState, State},
     transform::components::Transform,
@@ -18,23 +18,22 @@ use bevy::{
     utils::default,
 };
 use bevy_egui::{
-    EguiContexts,
     egui::{self, DragValue, Window},
+    EguiContexts,
 };
 use std::fs;
 
 use crate::ai::systems::AiTurnMessage;
 use crate::common::components::GridPosition;
 use crate::common::messages::SaveGameMessage;
-use crate::common::systems::{SAVE_PATH, get_save_path};
+use crate::common::systems::{get_save_path, SAVE_PATH};
 use crate::country::messages::{
     AcceptPeaceMessage, ChangeRelationMessage, ProposePeaceMessage, RejectPeaceMessage,
 };
-use crate::map::messages::ArmyBattleMessage;
+use crate::map::messages::{ArmyBattleMessage, SaveMapMessage};
 use crate::ui::messages::UiClickMessage;
 use crate::ui::resources::UiSounds;
 use crate::{
-    GameState, InGameStates,
     common::messages::NextTurnMessage,
     country::{components::OwnershipTile, resources::*},
     map::{
@@ -48,6 +47,7 @@ use crate::{
         messages::UiGameMessages,
         resources::{GameLoadState, MenuIcons, TurnCounter, UiModel},
     },
+    GameState, InGameStates,
 };
 
 pub fn setup_audio(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -238,6 +238,37 @@ fn save_popup_ui(ctx: &egui::Context, ui_model: &mut UiModel, msgs: &mut UiGameM
     ui_model.save_popup_open = is_open;
 }
 
+fn save_map_popup_ui(ctx: &egui::Context, ui_model: &mut UiModel, msgs: &mut UiGameMessages) {
+    let mut is_open = ui_model.save_map_popup_open;
+    let mut saved = false;
+
+    if ui_model.save_map_popup_open {
+        egui::Window::new("Zapisz mapę")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .open(&mut is_open)
+            .show(ctx, |ui| {
+                ui.label("Nazwa mapy:");
+                ui.text_edit_singleline(&mut ui_model.map_file_name);
+                if ui.button("Zapisz").clicked() {
+                    msgs.ui_click_message.write(UiClickMessage {});
+                    msgs.save_map.write(SaveMapMessage {
+                        map_name: ui_model.map_file_name.clone(),
+                    });
+                    saved = true;
+                    ui.close();
+                }
+            });
+    }
+
+    if saved {
+        is_open = false;
+    }
+
+    ui_model.save_map_popup_open = is_open;
+}
+
 pub fn setup_ui(
     mut contexts: EguiContexts,
     mut msgs: UiGameMessages,
@@ -282,6 +313,7 @@ pub fn setup_ui(
         turn_ui(&mut msgs, &mut resources, ui, &ui_model);
         save_ui(&mut msgs, &mut ui_model, ui);
         save_popup_ui(ctx, &mut ui_model, &mut msgs);
+        save_map_popup_ui(ctx, &mut ui_model, &mut msgs);
         Ok(())
     });
     Ok(())
@@ -291,6 +323,10 @@ fn save_ui(msgs: &mut UiGameMessages<'_>, ui_model: &mut ResMut<'_, UiModel>, ui
     if ui.button("Save").clicked() {
         msgs.ui_click_message.write(UiClickMessage {});
         ui_model.save_popup_open = true;
+    }
+    if ui.button("Save Map").clicked() {
+        msgs.ui_click_message.write(UiClickMessage {});
+        ui_model.save_map_popup_open = true;
     }
 }
 
@@ -430,6 +466,16 @@ fn main_menu_buttons(
 
     ui.add_space(5.0);
 
+    if ui
+        .add(egui::Button::new("Load Map").min_size([100.0, 30.0].into()))
+        .clicked()
+    {
+        sound.write(UiClickMessage {});
+        next_state.set(GameState::LoadMap);
+    }
+
+    ui.add_space(5.0);
+
     ui.checkbox(&mut ui_model.ai_on, "AI on?");
 
     ui.add_space(5.0);
@@ -455,6 +501,47 @@ pub fn main_menu_system(
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .show(ctx, |ui| {
             main_menu_buttons(ui, &mut next_state, &mut exit, &mut sound, &mut ui_model);
+        });
+
+    Ok(())
+}
+
+pub fn load_map_menu_system(
+    mut contexts: EguiContexts,
+    mut next_state: ResMut<NextState<GameState>>,
+    mut load_state: ResMut<GameLoadState>,
+    mut ui_click_message_writer: MessageWriter<UiClickMessage>,
+) -> anyhow::Result<()> {
+    let ctx = contexts.ctx_mut()?;
+
+    egui::Window::new("Load Map")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
+            ui.heading("Select a map");
+            ui.add_space(10.0);
+
+            if let Ok(paths) = fs::read_dir("./maps") {
+                for path in paths.flatten() {
+                    let path = path.path();
+                    if path.is_file()
+                        && let Some(map_name) = path.file_stem()
+                        && let Some(map_name_str) = map_name.to_str()
+                        && ui.button(map_name_str).clicked()
+                    {
+                        ui_click_message_writer.write(UiClickMessage {});
+                        load_state.map_name = Some(map_name_str.to_owned());
+                        next_state.set(GameState::CountrySelection);
+                    }
+                }
+            }
+
+            ui.add_space(10.0);
+            if ui.button("Back").clicked() {
+                ui_click_message_writer.write(UiClickMessage {});
+                next_state.set(GameState::Menu);
+            }
         });
 
     Ok(())

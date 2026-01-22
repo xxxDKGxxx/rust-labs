@@ -2,6 +2,11 @@ use bevy::ecs::{entity::Entity, message::Message};
 
 use crate::common::components::GridPosition;
 
+#[derive(Message, Clone)]
+pub struct SaveMapMessage {
+    pub map_name: String,
+}
+
 #[derive(Message)]
 pub struct BuildBuildingMessage {
     pub tile_entity: Entity,

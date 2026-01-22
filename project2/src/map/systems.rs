@@ -1,4 +1,5 @@
 use std::cmp::min;
+use std::fs;
 
 use anyhow::{Result, anyhow};
 use bevy::{
@@ -22,46 +23,89 @@ use crate::{
     },
     map::{
         components::*,
-        messages::{ArmyBattleMessage, BuildBuildingMessage, MoveArmyMessage, SpawnArmyMessage},
+        messages::{
+            ArmyBattleMessage, BuildBuildingMessage, MoveArmyMessage, SaveMapMessage,
+            SpawnArmyMessage,
+        },
         resources::*,
     },
     ui::resources::GameLoadState,
 };
 
+pub fn save_map_terrain_system(
+    mut save_map_message_reader: MessageReader<SaveMapMessage>,
+    map_tiles: Query<(&MapTile, &GridPosition)>,
+    map_settings: Res<MapSettings>,
+) -> anyhow::Result<()> {
+    for save_map_message in save_map_message_reader.read() {
+        let mut tiles_to_save = Vec::new();
+        for (map_tile, grid_position) in map_tiles.iter() {
+            tiles_to_save.push((map_tile.clone(), *grid_position, false));
+        }
+
+        let map_save_state = MapSaveState {
+            map_tiles: tiles_to_save,
+            armies: Vec::new(),
+            map_settings: map_settings.clone(),
+        };
+
+        let save_json = serde_json::to_string_pretty(&map_save_state)?;
+
+        fs::create_dir_all("maps")?;
+        fs::write(
+            format!("maps/{}.json", save_map_message.map_name),
+            save_json,
+        )?;
+    }
+
+    Ok(())
+}
+
 pub fn setup_map(
     mut commands: Commands,
     map_settings: Res<super::resources::MapSettings>,
     mut tile_grid: ResMut<TileMapGrid>,
+    load_state: Res<GameLoadState>,
+    asset_server: Res<AssetServer>,
 ) {
-    let half_tile = map_settings.tile_size as f32 / 2.0;
-    let offset_x = -((map_settings.width * map_settings.tile_size) as f32) / 2.0 + half_tile;
-    let offset_y = -((map_settings.height * map_settings.tile_size) as f32) / 2.0 + half_tile;
+    if let Some(map_name) = &load_state.map_name {
+        let path = format!("maps/{}.json", map_name);
+        if let Ok(data) = std::fs::read_to_string(path)
+            && let Ok(state) = serde_json::from_str::<MapSaveState>(&data)
+        {
+            commands.insert_resource(state.map_settings.clone());
+            spawn_loaded_tiles(&mut commands, &state, &asset_server, &mut tile_grid);
+        }
+    } else {
+        let half_tile = map_settings.tile_size as f32 / 2.0;
+        let offset_x = -((map_settings.width * map_settings.tile_size) as f32) / 2.0 + half_tile;
+        let offset_y = -((map_settings.height * map_settings.tile_size) as f32) / 2.0 + half_tile;
 
-    let perlin = noise::Perlin::new(random());
-    let scale = 0.05f32;
+        let perlin = noise::Perlin::new(random());
+        let scale = 0.05f32;
 
-    for x in 0..map_settings.width {
-        for y in 0..map_settings.height {
-            let world_pos_x = (x * map_settings.tile_size) as f32 + offset_x;
-            let world_pos_y = (y * map_settings.tile_size) as f32 + offset_y;
+        for x in 0..map_settings.width {
+            for y in 0..map_settings.height {
+                let world_pos_x = (x * map_settings.tile_size) as f32 + offset_x;
+                let world_pos_y = (y * map_settings.tile_size) as f32 + offset_y;
 
-            let tile_type = tile_type_from_noise(&map_settings, perlin, scale, x, y);
+                let tile_type = tile_type_from_noise(&map_settings, perlin, scale, x, y);
 
-            let entity = spawn_tile(
-                &mut commands,
-                &map_settings,
-                x,
-                y,
-                world_pos_x,
-                world_pos_y,
-                tile_type,
-            );
+                let entity = spawn_tile(
+                    &mut commands,
+                    &map_settings,
+                    x,
+                    y,
+                    world_pos_x,
+                    world_pos_y,
+                    tile_type,
+                );
 
-            tile_grid.grid.insert((x, y), entity);
+                tile_grid.grid.insert((x, y), entity);
+            }
         }
     }
 }
-
 pub fn setup_cursor(mut commands: Commands, map_settings: Res<MapSettings>) {
     commands.spawn((
         Sprite {

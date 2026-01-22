@@ -210,6 +210,11 @@ pub fn propose_peace_system(
             from: proposal.from,
             to: proposal.to,
         });
+
+        println!(
+            "Country {} proposes peace to {}",
+            proposal.from, proposal.to
+        );
     }
 }
 
@@ -229,6 +234,10 @@ pub fn accept_peace_system(
             country_b_idx: message.to,
             relation: RelationStatus::Neutral,
         });
+        println!(
+            "Country {} acccepts peace from {}",
+            message.to, message.from
+        );
     }
 }
 
@@ -241,6 +250,8 @@ pub fn reject_peace_system(
             !((offer.from == message.from && offer.to == message.to)
                 || (offer.from == message.to && offer.to == message.from))
         });
+
+        println!("Country {} rejects peace from {}", message.to, message.from);
     }
 }
 

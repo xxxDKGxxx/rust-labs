@@ -1,14 +1,14 @@
 use bevy::prelude::*;
 
 use crate::{
-    GameState, InGameStates,
     common::{GenerateSet, LoadSet},
     log_error,
     map::{
-        messages::{ArmyBattleMessage, BuildBuildingMessage, SpawnArmyMessage},
+        messages::{ArmyBattleMessage, BuildBuildingMessage, SaveMapMessage, SpawnArmyMessage},
         resources::*,
         systems::*,
     },
+    GameState, InGameStates,
 };
 
 pub mod components;
@@ -16,6 +16,11 @@ pub mod messages;
 pub mod resources;
 pub mod systems;
 pub struct MapPlugin {}
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+enum MapSystemSet {
+    Save,
+}
 
 impl Plugin for MapPlugin {
     fn build(&self, app: &mut App) {
@@ -62,13 +67,19 @@ impl Plugin for MapPlugin {
                     move_army_system
                         .pipe(log_error)
                         .after(detect_army_collisions_system),
-                    save_map_system.pipe(log_error),
+                    save_map_system
+                        .pipe(log_error)
+                        .in_set(MapSystemSet::Save),
+                    save_map_terrain_system
+                        .pipe(log_error)
+                        .after(MapSystemSet::Save),
                     sync_army_colors_system,
                 )
                     .run_if(in_state(GameState::InGame)),
             )
             .add_message::<BuildBuildingMessage>()
             .add_message::<SpawnArmyMessage>()
+            .add_message::<SaveMapMessage>()
             .add_message::<ArmyBattleMessage>();
     }
 }

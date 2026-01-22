@@ -1,5 +1,4 @@
 use crate::{
-    GameState, InGameStates,
     common::messages::NextTurnMessage,
     log_error,
     ui::{
@@ -7,6 +6,7 @@ use crate::{
         resources::{GameLoadState, TurnCounter, UiModel},
         systems::*,
     },
+    GameState, InGameStates,
 };
 use bevy::{
     app::*,
@@ -45,6 +45,12 @@ impl Plugin for UiPlugin {
                 load_game_menu_system
                     .pipe(log_error)
                     .run_if(in_state(GameState::LoadGame)),
+            )
+            .add_systems(
+                EguiPrimaryContextPass,
+                load_map_menu_system
+                    .pipe(log_error)
+                    .run_if(in_state(GameState::LoadMap)),
             )
             .add_systems(
                 OnEnter(GameState::Loading),

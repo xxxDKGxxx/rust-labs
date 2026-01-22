@@ -23,6 +23,7 @@ impl FromWorld for TurnCounter {
 #[derive(Resource, Default)]
 pub struct GameLoadState {
     pub save_name: Option<String>,
+    pub map_name: Option<String>,
 }
 
 #[derive(Resource)]
@@ -38,7 +39,9 @@ pub struct UiModel {
     pub selected_number_of_units: i32,
     pub army_entity_being_moved: Option<Entity>,
     pub save_popup_open: bool,
+    pub save_map_popup_open: bool,
     pub save_file_name: String,
+    pub map_file_name: String,
     pub ai_on: bool,
 }
 
@@ -48,7 +51,9 @@ impl FromWorld for UiModel {
             selected_number_of_units: 1,
             army_entity_being_moved: None,
             save_popup_open: false,
+            save_map_popup_open: false,
             save_file_name: "".into(),
+            map_file_name: "".into(),
             ai_on: true,
         }
     }
