@@ -13,6 +13,7 @@ use bevy::{
     prelude::*,
     sprite::Text2d,
     state::state::{NextState, State},
+    tasks::IoTaskPool,
     transform::components::Transform,
     ui::widget::Text,
     utils::default,
@@ -23,7 +24,6 @@ use bevy_egui::{
 };
 use std::fs;
 
-use crate::common::components::GridPosition;
 use crate::common::messages::SaveGameMessage;
 use crate::common::systems::{SAVE_PATH, get_save_path};
 use crate::country::messages::{
@@ -48,6 +48,7 @@ use crate::{
         resources::{GameLoadState, MenuIcons, TurnCounter, UiModel},
     },
 };
+use crate::{common::components::GridPosition, log_error};
 
 pub fn setup_audio(mut commands: Commands, asset_server: Res<AssetServer>) {
     let click_handle = asset_server.load("ui-click.mp3");
@@ -379,18 +380,31 @@ pub fn save_turn_counter_system(
     turn_counter: Res<TurnCounter>,
 ) -> anyhow::Result<()> {
     for save_game_message in save_game_message_reader.read() {
-        let save_json = serde_json::to_string_pretty(&*turn_counter)?;
-
-        std::fs::create_dir_all(format!("{}/{}", SAVE_PATH, save_game_message.save_name))?;
-        std::fs::write(
-            format!(
-                "{}/{}/{}",
-                SAVE_PATH, save_game_message.save_name, SAVE_FILE_NAME
-            ),
-            save_json,
-        )?;
+        let save_name = save_game_message.save_name.clone();
+        let pool = IoTaskPool::get();
+        let turn_counter_cloned = (*turn_counter).clone();
+        pool.spawn(async move {
+            let save_json = match serde_json::to_string_pretty(&turn_counter_cloned) {
+                Ok(save_json) => save_json,
+                Err(e) => {
+                    log_error(In(anyhow::Result::Err(e.into())));
+                    return;
+                }
+            };
+            if let Err(e) = std::fs::create_dir_all(format!("{}/{}", SAVE_PATH, save_name)) {
+                log_error(In(anyhow::Result::Err(e.into())));
+                return;
+            };
+            if let Err(e) = std::fs::write(
+                format!("{}/{}/{}", SAVE_PATH, save_name, SAVE_FILE_NAME),
+                save_json,
+            ) {
+                log_error(In(anyhow::Result::Err(e.into())));
+                return;
+            };
+        })
+        .detach();
     }
-
     Ok(())
 }
 

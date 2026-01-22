@@ -9,7 +9,7 @@ pub struct MenuIcons {
     pub country_flags: Vec<Handle<Image>>,
 }
 
-#[derive(Resource, Serialize, Deserialize)]
+#[derive(Resource, Serialize, Deserialize, Clone)]
 pub struct TurnCounter {
     pub count: u32,
 }

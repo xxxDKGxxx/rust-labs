@@ -1,10 +1,11 @@
-use bevy::prelude::*;
+use bevy::{prelude::*, tasks::IoTaskPool};
 
 use crate::{
     common::{
         messages::SaveGameMessage,
-        systems::{get_save_path, SAVE_PATH},
+        systems::{SAVE_PATH, get_save_path},
     },
+    log_error,
     player::resources::PlayerData,
     ui::resources::GameLoadState,
 };
@@ -16,17 +17,31 @@ pub fn save_player_system(
     player_data: Res<PlayerData>,
 ) -> anyhow::Result<()> {
     for save_game_message in save_game_message_reader.read() {
-        let save_json = serde_json::to_string_pretty(&(*player_data))?;
-        std::fs::create_dir_all(format!("{}/{}", SAVE_PATH, save_game_message.save_name))?;
-        std::fs::write(
-            format!(
-                "{}/{}/{}",
-                SAVE_PATH, save_game_message.save_name, SAVE_FILE_NAME
-            ),
-            save_json,
-        )?;
+        let save_name = save_game_message.save_name.clone();
+        let pool = IoTaskPool::get();
+        let player_data_cloned = (*player_data).clone();
+        pool.spawn(async move {
+            let save_json = match serde_json::to_string_pretty(&player_data_cloned) {
+                Ok(save_json) => save_json,
+                Err(e) => {
+                    log_error(In(anyhow::Result::Err(e.into())));
+                    return;
+                }
+            };
+            if let Err(e) = std::fs::create_dir_all(format!("{}/{}", SAVE_PATH, save_name)) {
+                log_error(In(anyhow::Result::Err(e.into())));
+                return;
+            };
+            if let Err(e) = std::fs::write(
+                format!("{}/{}/{}", SAVE_PATH, save_name, SAVE_FILE_NAME),
+                save_json,
+            ) {
+                log_error(In(anyhow::Result::Err(e.into())));
+                return;
+            };
+        })
+        .detach();
     }
-
     Ok(())
 }
 

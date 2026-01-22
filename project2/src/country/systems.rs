@@ -11,6 +11,7 @@ use bevy::{
     math::Vec2,
     platform::collections::HashSet,
     sprite::Sprite,
+    tasks::IoTaskPool,
     transform::components::Transform,
 };
 use rand::Rng;
@@ -29,6 +30,7 @@ use crate::{
         },
         resources::*,
     },
+    log_error,
     map::{components::*, resources::MapSettings},
     ui::resources::GameLoadState,
 };
@@ -358,25 +360,40 @@ pub fn save_countries_system(
         for (ownership_tile, grid_position) in ownership_tiles_query.iter() {
             ownership_tiles_vec.push((*ownership_tile, *grid_position));
         }
-
         let state = CountriesSaveState {
             ownership_tiles: ownership_tiles_vec,
             countries: (*countries_resource).clone(),
             diplomacy: (*diplomacy_resource).clone(),
         };
-
-        let save_json = serde_json::to_string_pretty(&state)?;
-        std::fs::create_dir_all(format!("{}/{}", SAVE_PATH, save_game_message.save_name))?;
-        std::fs::write(
-            format!(
-                "{}/{}/{}",
-                SAVE_PATH, save_game_message.save_name, SAVE_FILE_NAME
-            ),
-            save_json,
-        )?;
+        spawn_save_thread(save_game_message, state);
     }
-
     Ok(())
+}
+
+fn spawn_save_thread(save_game_message: &SaveGameMessage, state: CountriesSaveState) {
+    let save_name = save_game_message.save_name.clone();
+    let pool = IoTaskPool::get();
+    pool.spawn(async move {
+        let save_json = match serde_json::to_string_pretty(&state) {
+            Ok(save_json) => save_json,
+            Err(e) => {
+                log_error(In(anyhow::Result::Err(e.into())));
+                return;
+            }
+        };
+        if let Err(e) = std::fs::create_dir_all(format!("{}/{}", SAVE_PATH, save_name)) {
+            log_error(In(anyhow::Result::Err(e.into())));
+            return;
+        }
+        if let Err(e) = std::fs::write(
+            format!("{}/{}/{}", SAVE_PATH, save_name, SAVE_FILE_NAME),
+            save_json,
+        ) {
+            log_error(In(anyhow::Result::Err(e.into())));
+            return;
+        }
+    })
+    .detach();
 }
 
 pub fn load_countries_system(

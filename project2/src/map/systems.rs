@@ -3,7 +3,8 @@ use std::fs;
 
 use anyhow::{Result, anyhow};
 use bevy::{
-    ecs::system::SystemParam, platform::collections::HashMap, prelude::*, window::PrimaryWindow,
+    ecs::system::SystemParam, platform::collections::HashMap, prelude::*, tasks::IoTaskPool,
+    window::PrimaryWindow,
 };
 use bevy_egui::EguiContexts;
 use itertools::Itertools;
@@ -21,6 +22,7 @@ use crate::{
         components::OwnershipTile,
         resources::{Countries, Diplomacy, RelationStatus},
     },
+    log_error,
     map::{
         components::*,
         messages::{
@@ -42,23 +44,37 @@ pub fn save_map_terrain_system(
         for (map_tile, grid_position) in map_tiles.iter() {
             tiles_to_save.push((map_tile.clone(), *grid_position, false));
         }
-
         let map_save_state = MapSaveState {
             map_tiles: tiles_to_save,
             armies: Vec::new(),
             map_settings: map_settings.clone(),
         };
-
-        let save_json = serde_json::to_string_pretty(&map_save_state)?;
-
-        fs::create_dir_all("maps")?;
-        fs::write(
-            format!("maps/{}.json", save_map_message.map_name),
-            save_json,
-        )?;
+        spawn_map_terrain_save_thread(save_map_message, map_save_state);
     }
-
     Ok(())
+}
+
+fn spawn_map_terrain_save_thread(save_map_message: &SaveMapMessage, map_save_state: MapSaveState) {
+    let save_name = save_map_message.map_name.clone();
+    let pool = IoTaskPool::get();
+    pool.spawn(async move {
+        let save_json = match serde_json::to_string_pretty(&map_save_state) {
+            Ok(save_json) => save_json,
+            Err(e) => {
+                log_error(In(anyhow::Result::Err(e.into())));
+                return;
+            }
+        };
+        if let Err(e) = fs::create_dir_all("maps") {
+            log_error(In(anyhow::Result::Err(e.into())));
+            return;
+        };
+        if let Err(e) = fs::write(format!("maps/{}.json", save_name), save_json) {
+            log_error(In(anyhow::Result::Err(e.into())));
+            return;
+        };
+    })
+    .detach();
 }
 
 fn generate_new_map(
@@ -409,17 +425,36 @@ pub fn save_map_system(
             armies,
             map_settings: map_settings.clone(),
         };
-        let save_json = serde_json::to_string_pretty(&map_save_state)?;
-        std::fs::create_dir_all(format!("{}/{}", SAVE_PATH, save_game_message.save_name))?;
-        std::fs::write(
-            format!(
-                "{}/{}/{}",
-                SAVE_PATH, save_game_message.save_name, SAVE_FILE_NAME
-            ),
-            save_json,
-        )?;
+        let save_name = save_game_message.save_name.clone();
+        let pool = IoTaskPool::get();
+        spawn_map_save_thread(map_save_state, save_name, pool);
     }
     Ok(())
+}
+
+fn spawn_map_save_thread(map_save_state: MapSaveState, save_name: String, pool: &IoTaskPool) {
+    pool.spawn(async move {
+        let save_json = match serde_json::to_string_pretty(&map_save_state) {
+            Ok(save_json) => save_json,
+            Err(e) => {
+                log_error(In(anyhow::Result::Err(e.into())));
+                return;
+            }
+        };
+        if let Err(e) = std::fs::create_dir_all(format!("{}/{}", SAVE_PATH, save_name)) {
+            log_error(In(anyhow::Result::Err(e.into())));
+            return;
+        };
+
+        if let Err(e) = std::fs::write(
+            format!("{}/{}/{}", SAVE_PATH, save_name, SAVE_FILE_NAME),
+            save_json,
+        ) {
+            log_error(In(anyhow::Result::Err(e.into())));
+            return;
+        };
+    })
+    .detach();
 }
 
 fn spawn_tile_from_save(
