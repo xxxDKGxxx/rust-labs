@@ -514,9 +514,15 @@ fn ai_evaluate_peace_offers(
         if diplomacy.get_relation(offer.to, offer.from) != RelationStatus::AtWar {
             continue;
         }
-        let my_strength = country_strengths.get(&offer.to).copied().unwrap_or(0);
-        let proposer_strength = country_strengths.get(&offer.from).copied().unwrap_or(0);
-        let should_accept = if my_strength < proposer_strength / 2 {
+        let Some(my_strength) = country_strengths.get(&offer.to) else {
+            error!("AI Error Could not get country strength for {}", offer.to);
+            return;
+        };
+        let Some(proposer_strength) = country_strengths.get(&offer.from) else {
+            error!("AI Error Could not get country strength for {}", offer.from);
+            return;
+        };
+        let should_accept = if *my_strength < *proposer_strength / 2 {
             rng.random_bool(0.7)
         } else {
             rng.random_bool(0.2)
