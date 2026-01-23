@@ -37,7 +37,6 @@ pub fn save_player_system(
                 save_json,
             ) {
                 log_error(In(anyhow::Result::Err(e.into())));
-                return;
             };
         })
         .detach();

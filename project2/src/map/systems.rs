@@ -71,7 +71,6 @@ fn spawn_map_terrain_save_thread(save_map_message: &SaveMapMessage, map_save_sta
         };
         if let Err(e) = fs::write(format!("maps/{}.json", save_name), save_json) {
             log_error(In(anyhow::Result::Err(e.into())));
-            return;
         };
     })
     .detach();
@@ -113,8 +112,9 @@ fn generate_new_map(
 
 pub fn setup_map(
     mut commands: Commands,
-    map_settings: Res<super::resources::MapSettings>,
+    mut app_exit: MessageWriter<AppExit>,
     mut tile_grid: ResMut<TileMapGrid>,
+    map_settings: Res<MapSettings>,
     load_state: Res<GameLoadState>,
     asset_server: Res<AssetServer>,
 ) {
@@ -125,6 +125,9 @@ pub fn setup_map(
         {
             commands.insert_resource(state.map_settings.clone());
             spawn_loaded_tiles(&mut commands, &state, &asset_server, &mut tile_grid);
+        } else {
+            error!("Encountered an error while deserializing the map");
+            app_exit.write(AppExit::error());
         }
     } else {
         generate_new_map(&mut commands, &map_settings, &mut tile_grid);
@@ -451,7 +454,6 @@ fn spawn_map_save_thread(map_save_state: MapSaveState, save_name: String, pool: 
             save_json,
         ) {
             log_error(In(anyhow::Result::Err(e.into())));
-            return;
         };
     })
     .detach();
@@ -753,7 +755,7 @@ pub fn resolve_army_battle_system(
                 &mut commands,
                 &mut army_a,
                 &mut army_b,
-                msg.clone(),
+                msg,
                 &mut army_battle_message_writer,
             );
         }

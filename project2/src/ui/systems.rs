@@ -400,7 +400,6 @@ pub fn save_turn_counter_system(
                 save_json,
             ) {
                 log_error(In(anyhow::Result::Err(e.into())));
-                return;
             };
         })
         .detach();
@@ -573,17 +572,16 @@ pub fn load_map_menu_system(
             ui.add_space(10.0);
             if let Ok(paths) = fs::read_dir("./maps") {
                 for path in paths.flatten() {
-                    let path = path.path();
-                    if path.is_file()
-                        && let Some(map_name) = path.file_stem()
-                        && let Some(map_name_str) = map_name.to_str()
-                        && ui.button(map_name_str).clicked()
-                    {
-                        ui_click_message_writer.write(UiClickMessage {});
-                        load_state.map_name = Some(map_name_str.to_owned());
-                        next_state.set(GameState::CountrySelection);
-                    }
+                    saved_map_entry(
+                        &mut next_state,
+                        &mut load_state,
+                        &mut ui_click_message_writer,
+                        ui,
+                        path,
+                    );
                 }
+            } else {
+                ui.label("No saved maps found");
             }
             ui.add_space(10.0);
             if ui.button("Back").clicked() {
@@ -592,6 +590,30 @@ pub fn load_map_menu_system(
             }
         });
     Ok(())
+}
+
+fn saved_map_entry(
+    next_state: &mut ResMut<'_, NextState<GameState>>,
+    load_state: &mut ResMut<'_, GameLoadState>,
+    ui_click_message_writer: &mut MessageWriter<'_, UiClickMessage>,
+    ui: &mut egui::Ui,
+    path: fs::DirEntry,
+) {
+    let path = path.path();
+    let mut count = 0;
+    if path.is_file()
+        && let Some(map_name) = path.file_stem()
+        && let Some(map_name_str) = map_name.to_str()
+        && ui.button(map_name_str).clicked()
+    {
+        ui_click_message_writer.write(UiClickMessage {});
+        load_state.map_name = Some(map_name_str.to_owned());
+        next_state.set(GameState::CountrySelection);
+        count += 1;
+    }
+    if count == 0 {
+        ui.label("No saved maps found");
+    }
 }
 
 pub fn load_game_menu_system(
@@ -610,17 +632,16 @@ pub fn load_game_menu_system(
             ui.add_space(10.0);
             if let Ok(paths) = fs::read_dir("./saves") {
                 for path in paths.flatten() {
-                    let path = path.path();
-                    if path.is_dir()
-                        && let Some(save_name) = path.file_name()
-                        && let Some(save_name_str) = save_name.to_str()
-                        && ui.button(save_name_str).clicked()
-                    {
-                        ui_click_message_writer.write(UiClickMessage {});
-                        load_state.save_name = Some(save_name_str.to_owned());
-                        next_state.set(GameState::Loading);
-                    }
+                    game_save_entry(
+                        &mut next_state,
+                        &mut load_state,
+                        &mut ui_click_message_writer,
+                        ui,
+                        path,
+                    );
                 }
+            } else {
+                ui.label("No saves found");
             }
             ui.add_space(10.0);
             if ui.button("Back").clicked() {
@@ -629,6 +650,30 @@ pub fn load_game_menu_system(
             }
         });
     Ok(())
+}
+
+fn game_save_entry(
+    next_state: &mut ResMut<'_, NextState<GameState>>,
+    load_state: &mut ResMut<'_, GameLoadState>,
+    ui_click_message_writer: &mut MessageWriter<'_, UiClickMessage>,
+    ui: &mut egui::Ui,
+    path: fs::DirEntry,
+) {
+    let path = path.path();
+    let mut count = 0;
+    if path.is_dir()
+        && let Some(save_name) = path.file_name()
+        && let Some(save_name_str) = save_name.to_str()
+        && ui.button(save_name_str).clicked()
+    {
+        ui_click_message_writer.write(UiClickMessage {});
+        load_state.save_name = Some(save_name_str.to_owned());
+        next_state.set(GameState::Loading);
+        count += 1;
+    }
+    if count == 0 {
+        ui.label("No saves found");
+    }
 }
 
 pub fn handle_selection_change_when_moving_army(

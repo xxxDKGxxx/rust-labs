@@ -390,7 +390,6 @@ fn spawn_save_thread(save_game_message: &SaveGameMessage, state: CountriesSaveSt
             save_json,
         ) {
             log_error(In(anyhow::Result::Err(e.into())));
-            return;
         }
     })
     .detach();
