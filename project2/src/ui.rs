@@ -1,4 +1,5 @@
 use crate::{
+    GameState, InGameStates,
     common::messages::NextTurnMessage,
     log_error,
     ui::{
@@ -6,11 +7,13 @@ use crate::{
         resources::{GameLoadState, TurnCounter, UiModel},
         systems::*,
     },
-    GameState, InGameStates,
 };
 use bevy::{
     app::*,
-    ecs::{schedule::IntoScheduleConfigs, system::IntoSystem},
+    ecs::{
+        schedule::{IntoScheduleConfigs, common_conditions::not},
+        system::IntoSystem,
+    },
     state::{condition::in_state, state::OnEnter},
 };
 use bevy_egui::EguiPrimaryContextPass;
@@ -32,7 +35,8 @@ impl Plugin for UiPlugin {
                     setup_ui.pipe(log_error),
                     display_peace_offers_system.pipe(log_error),
                 )
-                    .run_if(in_state(GameState::InGame)),
+                    .run_if(in_state(GameState::InGame))
+                    .run_if(not(in_state(InGameStates::AiTurn))),
             )
             .add_systems(
                 EguiPrimaryContextPass,
