@@ -210,9 +210,9 @@ pub struct ControlsUiResources<'w> {
 
 fn save_popup_ui(ctx: &egui::Context, ui_model: &mut UiModel, msgs: &mut UiGameMessages) {
     let mut is_open = ui_model.save_popup_open;
-    let mut saved = false;
+    let mut saved_and_close = false;
 
-    if ui_model.save_popup_open {
+    if is_open {
         egui::Window::new("Zapisz grę")
             .collapsible(false)
             .resizable(false)
@@ -226,13 +226,12 @@ fn save_popup_ui(ctx: &egui::Context, ui_model: &mut UiModel, msgs: &mut UiGameM
                     msgs.save_game.write(SaveGameMessage {
                         save_name: ui_model.save_file_name.clone(),
                     });
-                    saved = true;
-                    ui.close();
+                    saved_and_close = true;
                 }
             });
     }
 
-    if saved {
+    if saved_and_close {
         is_open = false;
     }
 
@@ -241,9 +240,9 @@ fn save_popup_ui(ctx: &egui::Context, ui_model: &mut UiModel, msgs: &mut UiGameM
 
 fn save_map_popup_ui(ctx: &egui::Context, ui_model: &mut UiModel, msgs: &mut UiGameMessages) {
     let mut is_open = ui_model.save_map_popup_open;
-    let mut saved = false;
+    let mut saved_and_close = false;
 
-    if ui_model.save_map_popup_open {
+    if is_open {
         egui::Window::new("Zapisz mapę")
             .collapsible(false)
             .resizable(false)
@@ -257,13 +256,12 @@ fn save_map_popup_ui(ctx: &egui::Context, ui_model: &mut UiModel, msgs: &mut UiG
                     msgs.save_map.write(SaveMapMessage {
                         map_name: ui_model.map_file_name.clone(),
                     });
-                    saved = true;
-                    ui.close();
+                    saved_and_close = true;
                 }
             });
     }
 
-    if saved {
+    if saved_and_close {
         is_open = false;
     }
 
@@ -559,7 +557,7 @@ pub fn main_menu_system(
 pub fn load_map_menu_system(
     mut contexts: EguiContexts,
     mut next_state: ResMut<NextState<GameState>>,
-    mut load_state: ResMut<GameLoadState>,
+    load_state: ResMut<GameLoadState>,
     mut ui_click_message_writer: MessageWriter<UiClickMessage>,
 ) -> anyhow::Result<()> {
     let ctx = contexts.ctx_mut()?;
@@ -571,15 +569,13 @@ pub fn load_map_menu_system(
             ui.heading("Select a map");
             ui.add_space(10.0);
             if let Ok(paths) = fs::read_dir("./maps") {
-                for path in paths.flatten() {
-                    saved_map_entry(
-                        &mut next_state,
-                        &mut load_state,
-                        &mut ui_click_message_writer,
-                        ui,
-                        path,
-                    );
-                }
+                render_map_saves(
+                    &mut next_state,
+                    load_state,
+                    &mut ui_click_message_writer,
+                    ui,
+                    paths,
+                );
             } else {
                 ui.label("No saved maps found");
             }
@@ -592,6 +588,29 @@ pub fn load_map_menu_system(
     Ok(())
 }
 
+fn render_map_saves(
+    next_state: &mut ResMut<'_, NextState<GameState>>,
+    mut load_state: ResMut<'_, GameLoadState>,
+    ui_click_message_writer: &mut MessageWriter<'_, UiClickMessage>,
+    ui: &mut egui::Ui,
+    paths: fs::ReadDir,
+) {
+    let mut count = 0;
+    for path in paths.flatten() {
+        saved_map_entry(
+            next_state,
+            &mut load_state,
+            ui_click_message_writer,
+            ui,
+            path,
+        );
+        count += 1;
+    }
+    if count == 0 {
+        ui.label("No saved maps found");
+    }
+}
+
 fn saved_map_entry(
     next_state: &mut ResMut<'_, NextState<GameState>>,
     load_state: &mut ResMut<'_, GameLoadState>,
@@ -600,7 +619,6 @@ fn saved_map_entry(
     path: fs::DirEntry,
 ) {
     let path = path.path();
-    let mut count = 0;
     if path.is_file()
         && let Some(map_name) = path.file_stem()
         && let Some(map_name_str) = map_name.to_str()
@@ -609,17 +627,13 @@ fn saved_map_entry(
         ui_click_message_writer.write(UiClickMessage {});
         load_state.map_name = Some(map_name_str.to_owned());
         next_state.set(GameState::CountrySelection);
-        count += 1;
-    }
-    if count == 0 {
-        ui.label("No saved maps found");
     }
 }
 
 pub fn load_game_menu_system(
     mut contexts: EguiContexts,
     mut next_state: ResMut<NextState<GameState>>,
-    mut load_state: ResMut<GameLoadState>,
+    load_state: ResMut<GameLoadState>,
     mut ui_click_message_writer: MessageWriter<UiClickMessage>,
 ) -> anyhow::Result<()> {
     let ctx = contexts.ctx_mut()?;
@@ -631,15 +645,13 @@ pub fn load_game_menu_system(
             ui.heading("Select a save");
             ui.add_space(10.0);
             if let Ok(paths) = fs::read_dir("./saves") {
-                for path in paths.flatten() {
-                    game_save_entry(
-                        &mut next_state,
-                        &mut load_state,
-                        &mut ui_click_message_writer,
-                        ui,
-                        path,
-                    );
-                }
+                render_game_save_entries(
+                    &mut next_state,
+                    load_state,
+                    &mut ui_click_message_writer,
+                    ui,
+                    paths,
+                );
             } else {
                 ui.label("No saves found");
             }
@@ -652,6 +664,29 @@ pub fn load_game_menu_system(
     Ok(())
 }
 
+fn render_game_save_entries(
+    next_state: &mut ResMut<'_, NextState<GameState>>,
+    mut load_state: ResMut<'_, GameLoadState>,
+    ui_click_message_writer: &mut MessageWriter<'_, UiClickMessage>,
+    ui: &mut egui::Ui,
+    paths: fs::ReadDir,
+) {
+    let mut count = 0;
+    for path in paths.flatten() {
+        game_save_entry(
+            next_state,
+            &mut load_state,
+            ui_click_message_writer,
+            ui,
+            path,
+        );
+        count += 1;
+    }
+    if count == 0 {
+        ui.label("No saves found");
+    }
+}
+
 fn game_save_entry(
     next_state: &mut ResMut<'_, NextState<GameState>>,
     load_state: &mut ResMut<'_, GameLoadState>,
@@ -660,7 +695,6 @@ fn game_save_entry(
     path: fs::DirEntry,
 ) {
     let path = path.path();
-    let mut count = 0;
     if path.is_dir()
         && let Some(save_name) = path.file_name()
         && let Some(save_name_str) = save_name.to_str()
@@ -669,10 +703,6 @@ fn game_save_entry(
         ui_click_message_writer.write(UiClickMessage {});
         load_state.save_name = Some(save_name_str.to_owned());
         next_state.set(GameState::Loading);
-        count += 1;
-    }
-    if count == 0 {
-        ui.label("No saves found");
     }
 }
 
