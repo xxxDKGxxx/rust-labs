@@ -9,7 +9,7 @@ pub struct CustomString {
 }
 
 impl CustomString {
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_s(s: &str) -> Self {
         let len = s.len();
         let c_str_ptr = unsafe { malloc(len + 1) as *mut c_char };
 
@@ -35,11 +35,18 @@ impl CustomString {
         self.len
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
     pub fn as_ptr(&self) -> *const c_char {
         self.ptr as *const c_char
     }
 
     pub fn as_str(&self) -> &str {
+        if self.ptr.is_null() {
+            return "";
+        }
         unsafe {
             std::str::from_utf8_unchecked(std::slice::from_raw_parts(
                 self.as_ptr() as *const u8,
@@ -200,7 +207,7 @@ impl NumberStringDictionary {
                     current = (*current).right;
                 } else {
                     let new_value =
-                        std::mem::replace(&mut (*new_node).value, CustomString::from_str(""));
+                        std::mem::replace(&mut (*new_node).value, CustomString::from_s(""));
                     (*current).value = new_value;
                     Self::drop_node(new_node);
                     return;
@@ -615,7 +622,7 @@ macro_rules! dict {
         {
             let mut temp_dict = NumberStringDictionary::new();
             $(
-                temp_dict.insert($key, CustomString::from_str($value));
+                temp_dict.insert($key, CustomString::from_s($value));
             )*
             temp_dict
         }
@@ -642,7 +649,7 @@ pub mod ffi {
     }
 
     #[no_mangle]
-    pub extern "C" fn dict_free(dict: *mut NumberStringDictionary) {
+    pub unsafe extern "C" fn dict_free(dict: *mut NumberStringDictionary) {
         if !dict.is_null() {
             unsafe {
                 ptr::drop_in_place(dict);
@@ -652,7 +659,7 @@ pub mod ffi {
     }
 
     #[no_mangle]
-    pub extern "C" fn dict_insert(
+    pub unsafe extern "C" fn dict_insert(
         dict: *mut NumberStringDictionary,
         key: u64,
         value: *const c_char,
@@ -663,12 +670,15 @@ pub mod ffi {
         let dict = unsafe { &mut *dict };
         let c_str = unsafe { CStr::from_ptr(value) };
         if let Ok(rust_str) = c_str.to_str() {
-            dict.insert(key, CustomString::from_str(rust_str));
+            dict.insert(key, CustomString::from_s(rust_str));
         }
     }
 
     #[no_mangle]
-    pub extern "C" fn dict_get(dict: *const NumberStringDictionary, key: u64) -> *const c_char {
+    pub unsafe extern "C" fn dict_get(
+        dict: *const NumberStringDictionary,
+        key: u64,
+    ) -> *const c_char {
         if dict.is_null() {
             return ptr::null();
         }
@@ -680,7 +690,10 @@ pub mod ffi {
     }
 
     #[no_mangle]
-    pub extern "C" fn dict_contains_key(dict: *const NumberStringDictionary, key: u64) -> bool {
+    pub unsafe extern "C" fn dict_contains_key(
+        dict: *const NumberStringDictionary,
+        key: u64,
+    ) -> bool {
         if dict.is_null() {
             return false;
         }
@@ -689,7 +702,7 @@ pub mod ffi {
     }
 
     #[no_mangle]
-    pub extern "C" fn dict_remove(dict: *mut NumberStringDictionary, key: u64) {
+    pub unsafe extern "C" fn dict_remove(dict: *mut NumberStringDictionary, key: u64) {
         if dict.is_null() {
             return;
         }
@@ -704,9 +717,9 @@ mod tests {
 
     #[test]
     fn test_mystring() {
-        let s1 = CustomString::from_str("hello");
+        let s1 = CustomString::from_s("hello");
         let s2 = s1.clone();
-        let s3 = CustomString::from_str("world");
+        let s3 = CustomString::from_s("world");
 
         assert_eq!(s1.len(), 5);
         assert_eq!(s2.len(), 5);
@@ -719,23 +732,23 @@ mod tests {
     #[test]
     fn test_dict_insert_and_get() {
         let mut dict = NumberStringDictionary::new();
-        dict.insert(10, CustomString::from_str("ten"));
-        dict.insert(20, CustomString::from_str("twenty"));
-        dict.insert(5, CustomString::from_str("five"));
+        dict.insert(10, CustomString::from_s("ten"));
+        dict.insert(20, CustomString::from_s("twenty"));
+        dict.insert(5, CustomString::from_s("five"));
 
         assert!(dict.contains_key(10));
         assert!(dict.contains_key(20));
         assert!(dict.contains_key(5));
         assert!(!dict.contains_key(15));
 
-        assert_eq!(dict.get(10), Some(&CustomString::from_str("ten")));
-        assert_eq!(dict.get(20), Some(&CustomString::from_str("twenty")));
-        assert_eq!(dict.get(5), Some(&CustomString::from_str("five")));
+        assert_eq!(dict.get(10), Some(&CustomString::from_s("ten")));
+        assert_eq!(dict.get(20), Some(&CustomString::from_s("twenty")));
+        assert_eq!(dict.get(5), Some(&CustomString::from_s("five")));
         assert_eq!(dict.get(15), None);
 
         // Test updating a key
-        dict.insert(10, CustomString::from_str("ten-updated"));
-        assert_eq!(dict.get(10), Some(&CustomString::from_str("ten-updated")));
+        dict.insert(10, CustomString::from_s("ten-updated"));
+        assert_eq!(dict.get(10), Some(&CustomString::from_s("ten-updated")));
     }
 
     #[test]
@@ -743,7 +756,7 @@ mod tests {
         let mut dict = NumberStringDictionary::new();
         let keys = [10, 20, 5, 15, 25, 3, 8, 1, 4, 7, 9];
         for &key in &keys {
-            dict.insert(key, CustomString::from_str(&key.to_string()));
+            dict.insert(key, CustomString::from_s(&key.to_string()));
         }
 
         // Remove a leaf node
@@ -777,10 +790,7 @@ mod tests {
         let remaining_keys = [20, 15, 25, 3, 4, 7, 9];
         for &key in &remaining_keys {
             assert!(dict.contains_key(key));
-            assert_eq!(
-                dict.get(key),
-                Some(&CustomString::from_str(&key.to_string()))
-            );
+            assert_eq!(dict.get(key), Some(&CustomString::from_s(&key.to_string())));
         }
     }
 
@@ -797,8 +807,8 @@ mod tests {
         assert!(dict.contains_key(3));
         assert!(!dict.contains_key(4));
 
-        assert_eq!(dict.get(1), Some(&CustomString::from_str("one")));
-        assert_eq!(dict.get(2), Some(&CustomString::from_str("two")));
-        assert_eq!(dict.get(3), Some(&CustomString::from_str("three")));
+        assert_eq!(dict.get(1), Some(&CustomString::from_s("one")));
+        assert_eq!(dict.get(2), Some(&CustomString::from_s("two")));
+        assert_eq!(dict.get(3), Some(&CustomString::from_s("three")));
     }
 }

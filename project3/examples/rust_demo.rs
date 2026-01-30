@@ -10,11 +10,11 @@ fn main() {
     // insert elements
     println!("\n2. Inserting key-value pairs:");
     println!("   - Inserting (10, 'ten')");
-    dict.insert(10, CustomString::from_str("ten"));
+    dict.insert(10, CustomString::from_s("ten"));
     println!("   - Inserting (20, 'twenty')");
-    dict.insert(20, CustomString::from_str("twenty"));
+    dict.insert(20, CustomString::from_s("twenty"));
     println!("   - Inserting (5, 'five')");
-    dict.insert(5, CustomString::from_str("five"));
+    dict.insert(5, CustomString::from_s("five"));
 
     // check for keys
     println!("\n3. Checking for keys:");
