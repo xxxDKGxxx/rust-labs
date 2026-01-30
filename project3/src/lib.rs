@@ -40,14 +40,12 @@ impl CustomString {
     }
 
     pub fn as_str(&self) -> &str {
-        let val_str = unsafe {
+        unsafe {
             std::str::from_utf8_unchecked(std::slice::from_raw_parts(
                 self.as_ptr() as *const u8,
                 self.len(),
             ))
-        };
-
-        val_str
+        }
     }
 }
 

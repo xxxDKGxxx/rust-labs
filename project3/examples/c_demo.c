@@ -4,7 +4,7 @@
 int main() {
   printf("--- C Dictionary Demo ---\n");
 
-  // 1. Create a new dictionary
+  // create a new dictionary
   printf("\n1. Creating a new dictionary.\n");
   NumberStringDictionary *dict = dict_new();
   if (!dict) {
@@ -12,7 +12,7 @@ int main() {
     return 1;
   }
 
-  // 2. Insert elements
+  // insert elements
   printf("\n2. Inserting key-value pairs:\n");
   printf("   - Inserting (10, 'ten')\n");
   dict_insert(dict, 10, "ten");
@@ -21,14 +21,14 @@ int main() {
   printf("   - Inserting (5, 'five')\n");
   dict_insert(dict, 5, "five");
 
-  // 3. Check for keys
+  // check for keys
   printf("\n3. Checking for keys:\n");
   printf("   - Contains key 10? %s\n",
          dict_contains_key(dict, 10) ? "true" : "false");
   printf("   - Contains key 15? %s\n",
          dict_contains_key(dict, 15) ? "true" : "false");
 
-  // 4. Get values
+  // get values
   printf("\n4. Getting values:\n");
   const char *val = dict_get(dict, 10);
   if (val) {
@@ -39,7 +39,7 @@ int main() {
     printf("   - Value for key 15: Not found (as expected)\n");
   }
 
-  // 5. Remove an element
+  // remove an element
   printf("\n5. Removing an element:\n");
   printf("   - Removing key 20...\n");
   dict_remove(dict, 20);
@@ -48,7 +48,7 @@ int main() {
   printf("   - Contains key 10 after removal? %s\n",
          dict_contains_key(dict, 10) ? "true" : "false");
 
-  // 6. Free the dictionary
+  // free the dictionary
   printf("\n6. Freeing the dictionary.\n");
   dict_free(dict);
 
