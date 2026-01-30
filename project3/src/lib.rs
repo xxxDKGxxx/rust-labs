@@ -607,7 +607,7 @@ impl Drop for NumberStringDictionary {
 
 #[macro_export]
 macro_rules! dict {
-    // Handle trailing comma
+    // handle trailing comma
     ($($key:expr => $value:expr,)+) => {
         dict!($($key => $value),+)
     };
