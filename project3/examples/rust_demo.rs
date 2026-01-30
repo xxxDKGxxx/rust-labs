@@ -24,15 +24,14 @@ fn main() {
     // 4. Get values
     println!("\n4. Getting values:");
     if let Some(val) = dict.get(10) {
-        // This is unsafe because we are converting a raw pointer to a slice.
-        // We know it's safe because MyString stores the length.
-        let val_str = unsafe {
-            std::str::from_utf8_unchecked(std::slice::from_raw_parts(
-                val.as_ptr() as *const u8,
-                val.len(),
-            ))
-        };
-        println!("   - Value for key 10: {}", val_str);
+        // let val_str = unsafe {
+        //     std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+        //         val.as_ptr() as *const u8,
+        //         val.len(),
+        //     ))
+        // };
+
+        println!("   - Value for key 10: {}", val.as_str());
     }
     if dict.get(15).is_none() {
         println!("   - Value for key 15: Not found (as expected)");

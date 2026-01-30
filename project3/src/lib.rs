@@ -1,7 +1,7 @@
 use libc::{c_char, free, malloc, strcpy};
 use std::ptr;
 
-// A custom string type that manages its own memory.
+// custom string type that manages its own memory.
 #[derive(Debug)]
 pub struct CustomString {
     ptr: *mut c_char,
@@ -11,13 +11,9 @@ pub struct CustomString {
 impl CustomString {
     pub fn from_str(s: &str) -> Self {
         let len = s.len();
-        // Allocate memory for the string plus a null terminator.
         let c_str_ptr = unsafe { malloc(len + 1) as *mut c_char };
 
         if c_str_ptr.is_null() {
-            // In a real-world scenario, we would handle this error more gracefully.
-            // For this project, we'll follow the no-panic rule.
-            // Returning an empty string is a possible safe fallback.
             return Self {
                 ptr: ptr::null_mut(),
                 len: 0,
@@ -25,9 +21,7 @@ impl CustomString {
         }
 
         unsafe {
-            // Copy the string content.
             ptr::copy_nonoverlapping(s.as_ptr() as *const c_char, c_str_ptr, len);
-            // Null-terminate the string.
             *c_str_ptr.add(len) = 0;
         }
 
@@ -37,14 +31,23 @@ impl CustomString {
         }
     }
 
-    // Returns the length of the string.
     pub fn len(&self) -> usize {
         self.len
     }
 
-    // Returns a raw pointer to the underlying C-style string.
     pub fn as_ptr(&self) -> *const c_char {
         self.ptr as *const c_char
+    }
+
+    pub fn as_str(&self) -> &str {
+        let val_str = unsafe {
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(
+                self.as_ptr() as *const u8,
+                self.len(),
+            ))
+        };
+
+        val_str
     }
 }
 
@@ -181,41 +184,46 @@ impl NumberStringDictionary {
         !self.find_node(key).is_null()
     }
 
-    // 34
     pub fn insert(&mut self, key: u64, value: CustomString) {
         let new_node = Node::new(key, value);
         if new_node.is_null() {
             return;
         }
-        let mut y = ptr::null_mut();
-        let mut x = self.root;
-        while !x.is_null() {
-            y = x;
+
+        let mut parent = ptr::null_mut();
+        let mut current = self.root;
+
+        while !current.is_null() {
+            parent = current;
             unsafe {
-                if (*new_node).key < (*x).key {
-                    x = (*x).left;
-                } else if (*new_node).key > (*x).key {
-                    x = (*x).right;
+                if (*new_node).key < (*current).key {
+                    current = (*current).left;
+                } else if (*new_node).key > (*current).key {
+                    current = (*current).right;
                 } else {
                     let new_value =
                         std::mem::replace(&mut (*new_node).value, CustomString::from_str(""));
-                    (*x).value = new_value;
+                    (*current).value = new_value;
                     Self::drop_node(new_node);
                     return;
                 }
             }
         }
         unsafe {
-            (*new_node).parent = y;
-            if y.is_null() {
-                self.root = new_node;
-            } else if (*new_node).key < (*y).key {
-                (*y).left = new_node;
-            } else {
-                (*y).right = new_node;
-            }
-            self.insert_fixup(new_node);
+            self.link_new_node(new_node, parent);
         }
+    }
+
+    unsafe fn link_new_node(&mut self, new_node: *mut Node, parent: *mut Node) {
+        (*new_node).parent = parent;
+        if parent.is_null() {
+            self.root = new_node;
+        } else if (*new_node).key < (*parent).key {
+            (*parent).left = new_node;
+        } else {
+            (*parent).right = new_node;
+        }
+        self.insert_fixup(new_node);
     }
 
     unsafe fn insert_fixup(&mut self, mut z: *mut Node) {
@@ -337,53 +345,44 @@ impl NumberStringDictionary {
         (*y).parent = x;
     }
 
-    // 40
     pub fn remove(&mut self, key: u64) {
         let z = self.find_node(key);
         if z.is_null() {
             return; // Key not found
         }
         unsafe {
-            let mut y = z;
-            let mut _y_original_color = (*y).color;
-            let x: *mut Node;
-            let x_parent: *mut Node;
-            if (*z).left.is_null() {
-                x = (*z).right;
-                x_parent = (*z).parent;
-                self.transplant(z, (*z).right);
-            } else if (*z).right.is_null() {
-                x = (*z).left;
-                x_parent = (*z).parent;
-                self.transplant(z, (*z).left);
-            } else {
-                y = self.minimum((*z).right);
-                _y_original_color = (*y).color;
-                x = (*y).right;
-                if (*y).parent == z {
-                    x_parent = y;
-                } else {
-                    x_parent = (*y).parent;
-                    self.transplant(y, (*y).right);
-                    (*y).right = (*z).right;
-                    (*(*y).right).parent = y;
-                }
-                self.transplant(z, y);
-                (*y).left = (*z).left;
-                (*(*y).left).parent = y;
-                (*y).color = (*z).color;
-            }
-            if _y_original_color == Color::Black {
+            let (x, x_parent, y_original_color) = self.handle_remove_cases(z);
+            if y_original_color == Color::Black {
                 self.remove_fixup(x, x_parent);
             }
             Self::free_node(z);
         }
     }
 
-    unsafe fn remove_two_children(&mut self, z: *mut Node) -> Color {
+    unsafe fn handle_remove_cases(&mut self, z: *mut Node) -> (*mut Node, *mut Node, Color) {
+        let x: *mut Node;
+        let x_parent: *mut Node;
+
+        if (*z).left.is_null() {
+            x = (*z).right;
+            x_parent = (*z).parent;
+            self.transplant(z, (*z).right);
+            (x, x_parent, (*z).color)
+        } else if (*z).right.is_null() {
+            x = (*z).left;
+            x_parent = (*z).parent;
+            self.transplant(z, (*z).left);
+            (x, x_parent, (*z).color)
+        } else {
+            self.handle_remove_two_children(z)
+        }
+    }
+
+    unsafe fn handle_remove_two_children(&mut self, z: *mut Node) -> (*mut Node, *mut Node, Color) {
         let y = self.minimum((*z).right);
-        let _y_original_color = (*y).color;
+        let y_original_color = (*y).color;
         let x = (*y).right;
+        let x_parent;
         if (*y).parent == z {
             x_parent = y;
         } else {
@@ -396,7 +395,7 @@ impl NumberStringDictionary {
         (*y).left = (*z).left;
         (*(*y).left).parent = y;
         (*y).color = (*z).color;
-        _y_original_color
+        (x, x_parent, y_original_color)
     }
 
     unsafe fn minimum(&self, mut node: *mut Node) -> *mut Node {
@@ -442,8 +441,8 @@ impl NumberStringDictionary {
 
     unsafe fn remove_fixup_left_case(
         &mut self,
-        mut x: *mut Node,
-        mut parent: *mut Node,
+        x: *mut Node,
+        parent: *mut Node,
     ) -> (*mut Node, *mut Node) {
         let mut w = (*parent).right;
         if w.is_null() {
@@ -459,40 +458,57 @@ impl NumberStringDictionary {
         if w.is_null() {
             return (x, parent);
         }
+        self.handle_left_case_sibling_black(x, parent, w)
+    }
 
+    unsafe fn handle_left_case_sibling_black(
+        &mut self,
+        mut _x: *mut Node,
+        mut parent: *mut Node,
+        w: *mut Node,
+    ) -> (*mut Node, *mut Node) {
         if ((*w).left.is_null() || (*(*w).left).color == Color::Black)
             && ((*w).right.is_null() || (*(*w).right).color == Color::Black)
         {
             (*w).color = Color::Red;
-            x = parent;
-            parent = (*x).parent;
+            _x = parent;
+            parent = (*_x).parent;
+            (_x, parent)
         } else {
-            if (*w).right.is_null() || (*(*w).right).color == Color::Black {
-                if !(*w).left.is_null() {
-                    (*(*w).left).color = Color::Black;
-                }
-                (*w).color = Color::Red;
-                self.right_rotate(w);
-                w = (*parent).right;
-            }
-            if w.is_null() {
-                return (self.root, ptr::null_mut());
-            }
-            (*w).color = (*parent).color;
-            (*parent).color = Color::Black;
-            if !(*w).right.is_null() {
-                (*(*w).right).color = Color::Black;
-            }
-            self.left_rotate(parent);
-            x = self.root;
+            let new_x = self.handle_left_case_sibling_black_children(parent, w);
+            (new_x, ptr::null_mut())
         }
-        (x, parent)
+    }
+
+    unsafe fn handle_left_case_sibling_black_children(
+        &mut self,
+        parent: *mut Node,
+        mut w: *mut Node,
+    ) -> *mut Node {
+        if (*w).right.is_null() || (*(*w).right).color == Color::Black {
+            if !(*w).left.is_null() {
+                (*(*w).left).color = Color::Black;
+            }
+            (*w).color = Color::Red;
+            self.right_rotate(w);
+            w = (*parent).right;
+        }
+        if w.is_null() {
+            return self.root;
+        }
+        (*w).color = (*parent).color;
+        (*parent).color = Color::Black;
+        if !(*w).right.is_null() {
+            (*(*w).right).color = Color::Black;
+        }
+        self.left_rotate(parent);
+        self.root
     }
 
     unsafe fn remove_fixup_right_case(
         &mut self,
-        mut x: *mut Node,
-        mut parent: *mut Node,
+        x: *mut Node,
+        parent: *mut Node,
     ) -> (*mut Node, *mut Node) {
         let mut w = (*parent).left;
         if w.is_null() {
@@ -508,34 +524,50 @@ impl NumberStringDictionary {
         if w.is_null() {
             return (x, parent);
         }
+        self.handle_right_case_sibling_black(x, parent, w)
+    }
 
+    unsafe fn handle_right_case_sibling_black(
+        &mut self,
+        mut _x: *mut Node,
+        mut parent: *mut Node,
+        w: *mut Node,
+    ) -> (*mut Node, *mut Node) {
         if ((*w).right.is_null() || (*(*w).right).color == Color::Black)
             && ((*w).left.is_null() || (*(*w).left).color == Color::Black)
         {
             (*w).color = Color::Red;
-            x = parent;
-            parent = (*x).parent;
+            _x = parent;
+            parent = (*_x).parent;
+            (_x, parent)
         } else {
-            if (*w).left.is_null() || (*(*w).left).color == Color::Black {
-                if !(*w).right.is_null() {
-                    (*(*w).right).color = Color::Black;
-                }
-                (*w).color = Color::Red;
-                self.left_rotate(w);
-                w = (*parent).left;
-            }
-            if w.is_null() {
-                return (self.root, ptr::null_mut());
-            }
-            (*w).color = (*parent).color;
-            (*parent).color = Color::Black;
-            if !(*w).left.is_null() {
-                (*(*w).left).color = Color::Black;
-            }
-            self.right_rotate(parent);
-            x = self.root;
+            let new_x = self.handle_right_case_sibling_black_children(parent, w);
+            (new_x, ptr::null_mut())
         }
-        (x, parent)
+    }
+    unsafe fn handle_right_case_sibling_black_children(
+        &mut self,
+        parent: *mut Node,
+        mut w: *mut Node,
+    ) -> *mut Node {
+        if (*w).left.is_null() || (*(*w).left).color == Color::Black {
+            if !(*w).right.is_null() {
+                (*(*w).right).color = Color::Black;
+            }
+            (*w).color = Color::Red;
+            self.left_rotate(w);
+            w = (*parent).left;
+        }
+        if w.is_null() {
+            return self.root;
+        }
+        (*w).color = (*parent).color;
+        (*parent).color = Color::Black;
+        if !(*w).left.is_null() {
+            (*(*w).left).color = Color::Black;
+        }
+        self.right_rotate(parent);
+        self.root
     }
 
     unsafe fn drop_node(node_ptr: *mut Node) {
@@ -581,7 +613,6 @@ macro_rules! dict {
     ($($key:expr => $value:expr,)+) => {
         dict!($($key => $value),+)
     };
-    // Main macro logic
     ($($key:expr => $value:expr),*) => {
         {
             let mut temp_dict = NumberStringDictionary::new();
