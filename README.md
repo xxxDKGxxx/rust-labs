@@ -2,7 +2,7 @@
 
 This repository contains lab exercises and projects completed during the **Rust Programming** course at the **Faculty of Mathematics and Information Science (MiNI), Warsaw University of Technology (WUT)**.
 
-## 🚀 Projects
+## Projects
 
 The repository includes three major projects demonstrating various aspects of the Rust ecosystem, from low-level data structures to high-level game engines.
 
@@ -22,7 +22,7 @@ A memory-safe Red-Black Tree implementation with an emphasis on interoperability
 - **Key Features**: Efficient dictionary operations, rigorous trait implementations, and C-compatible bindings (`cdylib`).
 - **Tech Stack**: `libc` (FFI), Rust FFI (Foreign Function Interface).
 
-## 🧪 Lab Exercises
+## Lab Exercises
 
 A series of weekly labs covering the core concepts of the Rust language:
 
@@ -31,7 +31,7 @@ A series of weekly labs covering the core concepts of the Rust language:
 - **Lab 7-8**: Closures, iterators, and advanced collection manipulation.
 - **Lab 10-12**: Multi-threading, shared state, trait objects, and system-level programming.
 
-## 🛠️ Requirements
+## Requirements
 
 - **Rust**: Edition 2021/2024
 - **Cargo**: Standard build tool for dependency management.
